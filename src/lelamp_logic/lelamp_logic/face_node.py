@@ -70,7 +70,7 @@ class FaceNode(Node):
         self.pose_pub = self.create_publisher(Vector3Stamped, 'lelamp/face/head_pose', 10)
         self.center_pub = self.create_publisher(PointStamped, 'lelamp/face/center', 10)
         self.debug_pub = self.create_publisher(Image, 'lelamp/face/debug_image', 1)
-        self.create_subscription(Image, 'camera/image_raw', self._on_image,
+        self.create_subscription(Image, 'lelamp/sim_camera/image_raw', self._on_image,
                                  qos_profile_sensor_data)
 
     def _on_image(self, msg):

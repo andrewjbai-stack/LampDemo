@@ -4,29 +4,6 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz_default_plugins/Grid
-      Name: Grid
-      Enabled: true
-      Cell Size: 0.1
-      Plane Cell Count: 20
-      Reference Frame: <Fixed Frame>
-    - Class: rviz_default_plugins/RobotModel
-      Name: LeLamp
-      Enabled: true
-      Description Source: Topic
-      Description Topic:
-        Depth: 5
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /robot_description
-      Visual Enabled: true
-      Collision Enabled: false
-    - Class: rviz_default_plugins/TF
-      Name: TF
-      Enabled: false
-      Show Names: true
-      Marker Scale: 0.3
     - Class: rviz_default_plugins/Image
       Name: Camera
       Enabled: true
@@ -45,6 +22,15 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /lelamp/face/debug_image
+    - Class: rviz_default_plugins/Image
+      Name: Lamp head camera (sim)
+      Enabled: true
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /lelamp/sim_camera/image_raw
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -52,18 +38,10 @@ Visualization Manager:
     Frame Rate: 30
   Name: root
   Tools:
-    - Class: rviz_default_plugins/Interact
     - Class: rviz_default_plugins/MoveCamera
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.6
-      Focal Point:
-        X: 0
-        Y: 0
-        Z: 0.35
-      Pitch: 0.35
-      Yaw: 0.8
 Window Geometry:
-  Width: 1200
+  Width: 1000
   Height: 800

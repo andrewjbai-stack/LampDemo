@@ -4,7 +4,8 @@ Subscribes to target joint positions on /lelamp/joint_commands
 (sensor_msgs/JointState, positions only) and publishes /joint_states, moving
 each joint toward its target no faster than its URDF velocity limit and
 clamped to its URDF position limits. robot_state_publisher turns /joint_states
-into TF for RViz.
+into TF. mujoco_sim does the same job with a 3D view and reuses
+parse_revolute_joints from here.
 """
 import xml.etree.ElementTree as ET
 

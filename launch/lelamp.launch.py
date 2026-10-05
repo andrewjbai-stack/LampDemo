@@ -1,7 +1,9 @@
-"""Top-level LeLamp launch: camera + simulated body (+ RViz) + logic.
+"""Top-level LeLamp launch: camera + simulated body (MuJoCo) + logic.
 
     ros2 launch ~/lelamp_ws/launch/lelamp.launch.py
     ros2 launch ~/lelamp_ws/launch/lelamp.launch.py rviz:=false device:=/dev/video2
+
+RViz shows only the webcam, face-tracking and sim head camera feeds.
 """
 import os
 
@@ -18,7 +20,8 @@ def generate_launch_description():
                               'launch', 'sim.launch.py')
 
     return LaunchDescription([
-        DeclareLaunchArgument('rviz', default_value='true'),
+        DeclareLaunchArgument('rviz', default_value='true',
+                              description='Open RViz with the camera feeds'),
         DeclareLaunchArgument('device', default_value='/dev/video0',
                               description='Webcam device path or index'),
         IncludeLaunchDescription(

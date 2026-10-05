@@ -20,11 +20,12 @@ setup(
     zip_safe=True,
     maintainer='Andrew',
     maintainer_email='thecircularectangle@gmail.com',
-    description='Simulated LeLamp body: URDF, kinematic joint sim, and RViz setup.',
+    description='Simulated LeLamp body: URDF, kinematic joint sim, and MuJoCo viewer.',
     license='MIT',
     entry_points={
         'console_scripts': [
             'joint_sim = lelamp_sim.joint_sim_node:main',
+            'mujoco_sim = lelamp_sim.mujoco_sim_node:main',
         ],
     },
 )
