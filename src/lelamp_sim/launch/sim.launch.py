@@ -30,6 +30,11 @@ def generate_launch_description():
             parameters=[{'robot_description': robot_description}],
         ),
         Node(
+            package='lelamp_sim',
+            executable='image_tv',
+            condition=IfCondition(rviz),
+        ),
+        Node(
             package='rviz2',
             executable='rviz2',
             arguments=['-d', os.path.join(share, 'rviz', 'lelamp.rviz')],
