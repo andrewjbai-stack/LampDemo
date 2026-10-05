@@ -10,6 +10,7 @@ Outputs: /lelamp/joint_commands   (sensor_msgs/JointState, target positions)
 import math
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, JointState
@@ -64,7 +65,7 @@ def main(args=None):
     node = LogicNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
