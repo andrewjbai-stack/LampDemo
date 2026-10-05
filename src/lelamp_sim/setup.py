@@ -25,7 +25,6 @@ setup(
     entry_points={
         'console_scripts': [
             'joint_sim = lelamp_sim.joint_sim_node:main',
-            'image_tv = lelamp_sim.image_tv_node:main',
         ],
     },
 )

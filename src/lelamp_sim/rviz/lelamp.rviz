@@ -22,15 +22,6 @@ Visualization Manager:
         Value: /robot_description
       Visual Enabled: true
       Collision Enabled: false
-    - Class: rviz_default_plugins/Marker
-      Name: Camera TV
-      Enabled: true
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /lelamp/tv
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: false
