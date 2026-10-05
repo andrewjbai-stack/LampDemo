@@ -21,6 +21,8 @@ class CameraNode(Node):
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
         self.declare_parameter('fps', 15.0)
+        # MJPG: raw YUYV arrives green/garbled over usbipd in WSL2.
+        self.declare_parameter('fourcc', 'MJPG')
         self.declare_parameter('frame_id', 'camera_link')
         self.declare_parameter('fallback_test_pattern', True)
         self.declare_parameter('reopen_interval_s', 5.0)
@@ -29,6 +31,7 @@ class CameraNode(Node):
         self.width = int(self.get_parameter('width').value)
         self.height = int(self.get_parameter('height').value)
         self.fps = float(self.get_parameter('fps').value)
+        self.fourcc = str(self.get_parameter('fourcc').value)
         self.frame_id = self.get_parameter('frame_id').value
         self.fallback = bool(self.get_parameter('fallback_test_pattern').value)
         self.reopen_interval = float(self.get_parameter('reopen_interval_s').value)
@@ -47,6 +50,8 @@ class CameraNode(Node):
         dev = int(self.device) if str(self.device).isdigit() else self.device
         cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
         if cap.isOpened():
+            if len(self.fourcc) == 4:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             cap.set(cv2.CAP_PROP_FPS, self.fps)
