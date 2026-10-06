@@ -160,7 +160,12 @@ def build_model(urdf, meshdir):
     for x, y in [(0.2, 0.65), (0.2, -0.65), (-0.7, 0.65), (-0.7, -0.65)]:
         world.add_geom(type=box, size=[0.025, 0.025, 0.355], pos=[x, y, -0.395],
                        rgba=[0.15, 0.15, 0.15, 1])
-    world.add_geom(type=box, size=[0.025, 2, 1.25], pos=[0.45, 0, 0.5], material='wall')
+        
+    world.add_geom(type=box, size=[0.025, 4, 1.25], pos=[4.0, 0, 0.5], material='wall')
+    world.add_geom(type=box, size=[0.025, 4, 1.25], pos=[-4.0, 0, 0.5], material='wall')
+    world.add_geom(type=box, size=[4, 0.025, 1.25], pos=[0, -4.0, 0.5], material='wall')
+    world.add_geom(type=box, size=[4, 0.025, 1.25], pos=[0, 4.0, 0.5], material='wall')
+
     world.add_light(name='room', type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
                     pos=[0, 0, 2.5], dir=[0.2, 0.1, -1], castshadow=0,
                     diffuse=[0.15, 0.15, 0.17], specular=[0, 0, 0])

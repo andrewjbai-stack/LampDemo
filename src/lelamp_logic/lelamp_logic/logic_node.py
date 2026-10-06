@@ -1,14 +1,13 @@
 """Stub for the LeLamp's "brain".
 
-Today it only proves the wiring: it watches the camera stream and sends the
-body a gentle idle "breathing" motion. Perception, speech, memory, and
-goal-directed behavior will replace `_think()`.
+Runs a small state machine (behaviors.py: idle, attentive, look_around). The
+current state sets goals on LampMotion (motion.py), which eases the joints there
+every tick. The light color comes from the current state.
 
-Inputs:  /camera/image_raw        (sensor_msgs/Image)
+Inputs:  /lelamp/face/looking     (std_msgs/Bool)
 Outputs: /lelamp/joint_commands   (sensor_msgs/JointState, target positions)
+         /lelamp/light            (std_msgs/ColorRGBA)
 """
-import math
-
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -16,19 +15,25 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import Bool, ColorRGBA
 
+from lelamp_logic.behaviors import Attentive, Idle, LookAround, StateMachine
+from lelamp_logic.motion import LampMotion
+
 
 class LogicNode(Node):
     def __init__(self):
         super().__init__('logic_node')
-        self.declare_parameter('rate_hz', 10.0)
-        self.declare_parameter('idle_motion', True)
+        self.declare_parameter('rate_hz', 30.0)
+        self.declare_parameter('idle_motion', True)  # breathing on top of every pose
 
-        self.idle_motion = bool(self.get_parameter('idle_motion').value)
-        self.t = 0.0
         self.dt = 1.0 / float(self.get_parameter('rate_hz').value)
+        self.motion = LampMotion(breathing=bool(self.get_parameter('idle_motion').value))
 
         self.attentive = False # When user looks at lamp/webcam, lamp becomes attentive
-        self.last_logged_attentive = None  # so the first light state gets logged
+
+        self.brain = StateMachine(
+            self, {'idle': Idle(), 'attentive': Attentive(), 'look_around': LookAround()},
+            start='idle',
+            on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
         #self.create_subscription(Image, 'camera/image_raw', self._on_image,
         #                         qos_profile_sensor_data)
@@ -46,42 +51,16 @@ class LogicNode(Node):
 
 
     def _think(self):
-        # TODO: perception -> decision -> action. For now, idle breathing.
-        self.t += self.dt
-        if self.idle_motion:
-            cmd = JointState()
-            cmd.header.stamp = self.get_clock().now().to_msg()
-            cmd.name = ['base_yaw_joint', 'shoulder_pitch_joint', 'elbow_pitch_joint',
-                        'neck_yaw_joint', 'head_pitch_joint']
-            cmd.position = [
-                0.4 * math.sin(0.2 * self.t),
-                0.25 + 0.08 * math.sin(0.5 * self.t),
-                -0.9 + 0.08 * math.sin(0.5 * self.t + 0.6),
-                0.3 * math.sin(0.35 * self.t),
-                0.3 + 0.1 * math.sin(0.5 * self.t + 1.2),
-            ]
-            self.cmd_pub.publish(cmd)
+        # The current state decides what to do; behaviors live in behaviors.py.
+        self.brain.update(self.dt)
 
-        color_msg = ColorRGBA()
-        if(self.attentive):
-            color_msg.r = 1.0
-            color_msg.g = 0.0
-            color_msg.b = 0.0
-            color_msg.a = 1.0
-        else:
-            color_msg.r = 1.0
-            color_msg.g = 1.0
-            color_msg.b = 1.0
-            color_msg.a = 1.0
+        cmd = JointState()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        cmd.name, cmd.position = self.motion.step(self.dt)
+        self.cmd_pub.publish(cmd)
 
-        # Log only when the light changes, not every tick
-        if self.attentive != self.last_logged_attentive:
-            self.get_logger().info(
-                f'light -> {"attentive" if self.attentive else "idle"} '
-                f'(r={color_msg.r:.2f} g={color_msg.g:.2f} b={color_msg.b:.2f} a={color_msg.a:.2f})')
-            self.last_logged_attentive = self.attentive
-
-        self.color_pub.publish(color_msg)
+        r, g, b = self.brain.current.color
+        self.color_pub.publish(ColorRGBA(r=r, g=g, b=b, a=1.0))
 
 
 def main(args=None):
