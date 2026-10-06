@@ -22,12 +22,12 @@ import random
 
 CENTER_TV_POS = (-2.0, 0.0, 0.35)
 
-WHITE = (1.0, 1.0, 1.0)
-RED = (1.0, 0.0, 0.0)
+PASSIVE_LIGHT = (1.0, 1.0, 1.0, 0.5)
+ATTENTIVE_LIGHT = (1.0, 1.0, 1.0, 1.0)
 
 
 class Behavior:
-    color = WHITE  # light colour while this behavior runs
+    color = PASSIVE_LIGHT  # light colour while this behavior runs
 
     def enter(self, lamp):
         pass
@@ -66,7 +66,7 @@ class Animation(Behavior):
 
 class Attentive(Behavior):
     """Someone is looking at the lamp: stand tall and look back at them."""
-    color = RED
+    color = ATTENTIVE_LIGHT
 
     def __init__(self, grace=1.0):
         self.grace = grace  # seconds of no face before giving up (detector flickers)
@@ -90,7 +90,7 @@ class Idle(Behavior):
     def enter(self, lamp):
         self.elapsed = 0.0
         lamp.motion.move_to('rest')
-        lamp.motion.look_at(-1.0, 0.5, 0.35)
+        lamp.motion.look_at(*CENTER_TV_POS)
 
     def update(self, lamp, dt):
         if lamp.attentive:

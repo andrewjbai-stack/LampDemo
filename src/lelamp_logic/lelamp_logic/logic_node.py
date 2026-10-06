@@ -59,8 +59,8 @@ class LogicNode(Node):
         cmd.name, cmd.position = self.motion.step(self.dt)
         self.cmd_pub.publish(cmd)
 
-        r, g, b = self.brain.current.color
-        self.color_pub.publish(ColorRGBA(r=r, g=g, b=b, a=1.0))
+        r, g, b, a = self.brain.current.color
+        self.color_pub.publish(ColorRGBA(r=r, g=g, b=b, a=a))
 
 
 def main(args=None):

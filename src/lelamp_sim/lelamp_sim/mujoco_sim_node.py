@@ -32,6 +32,7 @@ from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import ColorRGBA
 
 from lelamp_sim.joint_sim_node import parse_revolute_joints
+from lelamp_sim.room_props import add_props, paint_props
 
 BULB_RGB = (1.0, 0.95, 0.76)  # URDF "fixture_light" material: the bulb visuals
 LIGHT_POS = (0.113, 0.0, 0.0)  # light_emitter_link inside lamp_head_link
@@ -106,7 +107,7 @@ def _load_ascii_stl(path):
 
 
 def build_model(urdf, meshdir):
-    """Lamp from the URDF plus desk, room, and the shade's spotlight."""
+    """Lamp from the URDF plus desk, room, props (room_props.py), and the shade's spotlight."""
     compiler = (f'<mujoco><compiler meshdir="{meshdir}" strippath="true" '
                 'discardvisual="false" fusestatic="false" balanceinertia="true"/></mujoco>')
     spec = mujoco.MjSpec.from_string(urdf.replace('</robot>', compiler + '</robot>', 1))
@@ -179,8 +180,10 @@ def build_model(urdf, meshdir):
                                         xyaxes=CAMERA_XYAXES, fovy=CAMERA_FOVY)
 
     add_tv(spec)
+    add_props(spec)
 
     model = spec.compile()
+    paint_props(model)
     return model, [model.geom(name).id for name in bulbs], model.light('lamp').id
 
 
