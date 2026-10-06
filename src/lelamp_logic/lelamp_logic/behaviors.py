@@ -137,6 +137,21 @@ class Focus(Behavior):
         return 'idle' if self.elapsed > self.hold else None
 
 
+class Obey(Behavior):
+    """Doing what it was told (logic_node sets the motion before switching here).
+    Holds that pose for a while, without getting bored or attentive."""
+
+    def __init__(self, hold=8.0):
+        self.hold = hold
+
+    def enter(self, lamp):
+        self.elapsed = 0.0
+
+    def update(self, lamp, dt):
+        self.elapsed += dt
+        return 'idle' if self.elapsed > self.hold else None
+
+
 class StateMachine:
     def __init__(self, lamp, behaviors, start, on_change=None):
         self.lamp = lamp

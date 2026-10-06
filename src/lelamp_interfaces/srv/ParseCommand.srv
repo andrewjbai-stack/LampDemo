@@ -1,0 +1,9 @@
+# Turn a heard phrase into lamp commands (llm_node).
+string text                       # the phrase, as voice_node heard it
+string[] known_objects            # names in the object memory, so it can pick one
+---
+bool success                      # false: the model isn't loaded
+string message                    # why it failed, or the raw model output
+string source                     # "keywords" or "llm"
+float32 seconds                   # time spent parsing
+lelamp_interfaces/LampCommand[] commands   # in order; empty if nothing was asked
