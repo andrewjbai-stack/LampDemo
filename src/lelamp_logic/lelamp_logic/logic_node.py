@@ -11,7 +11,10 @@ While looking around, the lamp asks object_node what it can see (the
 detect_objects service) and remembers where each object is in base_link
 (object_memory.py). Asking for an object by name makes it look back at it.
 
+Whatever voice_node hears arrives on /lelamp/speech; for now it's only logged.
+
 Inputs:  /lelamp/look_at_object       (std_msgs/String, e.g. "clock")
+         /lelamp/speech               (std_msgs/String, voice_node, one per phrase)
 Uses:    /lelamp/detect_faces         (lelamp_interfaces/DetectFaces, face_node)
          /lelamp/detect_objects       (lelamp_interfaces/DetectObjects, object_node)
 Outputs: /lelamp/joint_commands       (sensor_msgs/JointState, target positions)
@@ -57,6 +60,7 @@ class LogicNode(Node):
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
         self.create_subscription(String, 'lelamp/look_at_object', self._on_look_at_object, 10)
+        self.create_subscription(String, 'lelamp/speech', self._on_speech, 10)
         self.cmd_pub = self.create_publisher(JointState, 'lelamp/joint_commands', 10)
         self.color_pub = self.create_publisher(ColorRGBA, 'lelamp/light', 10)
         self.create_timer(self.dt, self._think)
@@ -85,6 +89,12 @@ class LogicNode(Node):
 
     def _on_look_at_object(self, msg):
         self.look_at_object(msg.data)
+
+    # --- voice ---
+
+    def _on_speech(self, msg):
+        """A phrase from voice_node. Just logged for now."""
+        self.get_logger().info(f'heard: "{msg.data}"')
 
     # --- object memory ---
 

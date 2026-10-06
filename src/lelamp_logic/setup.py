@@ -24,6 +24,7 @@ setup(
             'logic_node = lelamp_logic.logic_node:main',
             'face_node = lelamp_logic.face_node:main',
             'object_node = lelamp_logic.object_node:main',
+            'voice_node = lelamp_logic.voice_node:main',
         ],
     },
 )
