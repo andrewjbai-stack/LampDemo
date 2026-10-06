@@ -3,7 +3,7 @@
 <package format="3">
   <name>lelamp_interfaces</name>
   <version>0.1.0</version>
-  <description>LeLamp messages and services (object detection).</description>
+  <description>LeLamp messages and services (face and object detection).</description>
   <maintainer email="thecircularectangle@gmail.com">Andrew</maintainer>
   <license>MIT</license>
 

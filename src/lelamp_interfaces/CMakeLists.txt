@@ -7,7 +7,9 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/DetectedFace.msg"
   "msg/DetectedObject.msg"
+  "srv/DetectFaces.srv"
   "srv/DetectObjects.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )

@@ -1,20 +1,22 @@
-"""Face detection + head direction from the webcam.
+"""Face detection + head direction, behind a service.
 
-Uses OpenCV's YuNet detector (5 landmarks per face) and solvePnP against a
-generic 3D face to estimate which way the head is pointing. Tracks the largest
-face only.
+Keeps the newest camera frame. Each detect_faces call runs OpenCV's YuNet
+detector (5 landmarks per face) on that frame and estimates which way each head
+is pointing with solvePnP against a generic 3D face. "looking" is decided from
+the largest face, with hysteresis between calls.
 
-Inputs:  /camera/image_raw               (sensor_msgs/Image)
-Outputs: /lelamp/face/looking            (std_msgs/Bool) head pointed at the camera
-         /lelamp/face/head_pose          (geometry_msgs/Vector3Stamped, degrees)
-             x = yaw   (+ = head turned toward image right)
-             y = pitch (+ = head tilted up)
-             z = angle between head direction and the line to the camera
-         /lelamp/face/center             (geometry_msgs/PointStamped)
-             x, y = face center in normalized image coords [-1, 1] (+x right, +y down)
-             z = face width as a fraction of image width (rough distance cue)
-         /lelamp/face/debug_image        (sensor_msgs/Image) annotated frame
-head_pose and center are only published while a face is visible.
+    ros2 service call /lelamp/detect_faces lelamp_interfaces/srv/DetectFaces
+
+Inputs:  /lelamp/sim_camera/image_raw  (sensor_msgs/Image, param camera_topic)
+Service: /lelamp/detect_faces          (lelamp_interfaces/DetectFaces)
+             faces, largest first; per face (degrees):
+             yaw   (+ = head turned toward image right)
+             pitch (+ = head tilted up)
+             off_axis = angle between head direction and the line to the camera
+             center x, y = normalized image coords [-1, 1] (+x right, +y down),
+             center z = face width as a fraction of image width (rough distance cue)
+Outputs: /lelamp/face/debug_image      (sensor_msgs/Image) each checked frame,
+             annotated, while something subscribes (RViz)
 """
 import math
 import os
@@ -25,11 +27,13 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
-from geometry_msgs.msg import PointStamped, Vector3Stamped
+from geometry_msgs.msg import Point
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
+
+from lelamp_interfaces.msg import DetectedFace
+from lelamp_interfaces.srv import DetectFaces
 
 # Generic face in mm, OpenCV camera axes (x right, y down, z away from camera),
 # nose tip at the origin. Order matches YuNet's landmarks: right eye, left eye
@@ -49,6 +53,7 @@ class FaceNode(Node):
         default_model = os.path.join(get_package_share_directory('lelamp_logic'),
                                      'models', 'face_detection_yunet_2022mar.onnx')
         self.declare_parameter('model_path', default_model)
+        self.declare_parameter('camera_topic', 'lelamp/sim_camera/image_raw')
         self.declare_parameter('score_threshold', 0.8)
         self.declare_parameter('detect_width', 320)  # downscale before detecting
         self.declare_parameter('look_on_deg', 20.0)  # start "looking" below this
@@ -63,70 +68,78 @@ class FaceNode(Node):
         self.look_off = float(gp('look_off_deg'))
         self.debug = bool(gp('publish_debug_image'))
         self.looking = False
-        self._last_pose = None
+        self.frame = None
         self.bridge = CvBridge()
 
-        self.looking_pub = self.create_publisher(Bool, 'lelamp/face/looking', 10)
-        self.pose_pub = self.create_publisher(Vector3Stamped, 'lelamp/face/head_pose', 10)
-        self.center_pub = self.create_publisher(PointStamped, 'lelamp/face/center', 10)
         self.debug_pub = self.create_publisher(Image, 'lelamp/face/debug_image', 1)
-        self.create_subscription(Image, 'lelamp/sim_camera/image_raw', self._on_image,
+        self.create_subscription(Image, gp('camera_topic'), self._on_image,
                                  qos_profile_sensor_data)
+        self.create_service(DetectFaces, 'lelamp/detect_faces', self._on_detect)
 
     def _on_image(self, msg):
+        self.frame = msg  # only the newest is kept
+
+    def _on_detect(self, request, response):
+        msg = self.frame
+        if msg is None:
+            response.success = False
+            response.message = 'no camera frame yet'
+            return response
+
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         h, w = frame.shape[:2]
         scale = self.detect_width / w
         small = cv2.resize(frame, (self.detect_width, int(round(h * scale))))
         self.detector.setInputSize((small.shape[1], small.shape[0]))
         _, faces = self.detector.detect(small)
+        faces = [] if faces is None else sorted(
+            (np.append(f[:14] / scale, f[14]) for f in faces),  # full-res coords, same score
+            key=lambda f: -f[2] * f[3])  # largest first
 
-        face = None
-        if faces is not None and len(faces):
-            face = max(faces, key=lambda f: f[2] * f[3]) / scale  # largest, full-res coords
+        poses = []
+        for face in faces:
+            yaw, pitch, off_axis, pose = self._head_pose(face, w, h)
+            poses.append(pose)
+            x, y, fw, fh = (float(v) for v in face[:4])
+            response.faces.append(DetectedFace(
+                box=[x, y, fw, fh], score=float(face[14]),
+                landmarks=[float(v) for v in face[4:14]],
+                yaw=yaw, pitch=pitch, off_axis=off_axis,
+                center=Point(x=(x + fw / 2) / w * 2 - 1, y=(y + fh / 2) / h * 2 - 1, z=fw / w)))
 
-        if face is None:
-            self.looking = False
-        else:
-            yaw, pitch, off_axis = self._head_pose(face, w, h)
+        if faces:
+            off_axis = response.faces[0].off_axis
             self.looking = off_axis < (self.look_off if self.looking else self.look_on)
+        else:
+            self.looking = False
 
-            pose = Vector3Stamped()
-            pose.header = msg.header
-            pose.vector.x, pose.vector.y, pose.vector.z = yaw, pitch, off_axis
-            self.pose_pub.publish(pose)
-
-            x, y, fw, fh = face[:4]
-            center = PointStamped()
-            center.header = msg.header
-            center.point.x = float((x + fw / 2) / w * 2 - 1)
-            center.point.y = float((y + fh / 2) / h * 2 - 1)
-            center.point.z = float(fw / w)
-            self.center_pub.publish(center)
-
-        self.looking_pub.publish(Bool(data=self.looking))
-
+        response.success = True
+        response.looking = self.looking
+        response.header = msg.header
+        response.message = (f'{len(faces)} face(s), looking' if self.looking else
+                            f'{len(faces)} face(s)')
         if self.debug and self.debug_pub.get_subscription_count() > 0:
-            self._publish_debug(frame, face, msg.header)
+            self._publish_debug(frame, faces[0] if faces else None,
+                                poses[0] if poses else None, msg.header)
+        return response
 
     def _head_pose(self, face, w, h):
+        """(yaw, pitch, off_axis) in degrees and the raw PnP pose (or None)."""
         pts = face[4:14].reshape(5, 2).astype(np.float64)
         f = float(w)  # rough focal length for a laptop webcam (~53 deg HFOV)
         cam = np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1]], dtype=np.float64)
         ok, rvec, tvec = cv2.solvePnP(FACE_MODEL, pts, cam, None, flags=cv2.SOLVEPNP_SQPNP)
         if not ok:
-            self._last_pose = None
-            return 0.0, 0.0, 180.0
+            return 0.0, 0.0, 180.0, None
         rot, _ = cv2.Rodrigues(rvec)
         fwd = rot @ np.array([0.0, 0.0, -1.0])  # direction the face points
-        self._last_pose = (rvec, tvec, cam)
         yaw = math.degrees(math.atan2(fwd[0], -fwd[2]))
         pitch = math.degrees(math.atan2(-fwd[1], math.hypot(fwd[0], fwd[2])))
         to_cam = -tvec.ravel() / np.linalg.norm(tvec)
         off_axis = math.degrees(math.acos(float(np.clip(fwd @ to_cam, -1.0, 1.0))))
-        return yaw, pitch, off_axis
+        return yaw, pitch, off_axis, (rvec, tvec, cam)
 
-    def _publish_debug(self, frame, face, header):
+    def _publish_debug(self, frame, face, pose, header):
         img = frame.copy()
         if face is not None:
             x, y, fw, fh = face[:4].astype(int)
@@ -134,8 +147,8 @@ class FaceNode(Node):
             cv2.rectangle(img, (x, y), (x + fw, y + fh), color, 2)
             for i in range(5):
                 cv2.circle(img, (int(face[4 + 2 * i]), int(face[5 + 2 * i])), 3, (255, 0, 0), -1)
-            if self._last_pose is not None:
-                rvec, tvec, cam = self._last_pose
+            if pose is not None:
+                rvec, tvec, cam = pose
                 tip, _ = cv2.projectPoints(np.array([[0.0, 0.0, -80.0]]), rvec, tvec, cam, None)
                 nose = (int(face[8]), int(face[9]))
                 cv2.line(img, nose, tuple(tip.ravel().astype(int)), color, 3)

@@ -5,15 +5,6 @@ Visualization Manager:
   Class: ""
   Displays:
     - Class: rviz_default_plugins/Image
-      Name: Camera
-      Enabled: true
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /camera/image_raw
-    - Class: rviz_default_plugins/Image
       Name: Face tracking
       Enabled: true
       Topic:
@@ -31,15 +22,6 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /lelamp/objects/debug_image
-    - Class: rviz_default_plugins/Image
-      Name: Lamp head camera (sim)
-      Enabled: true
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /lelamp/sim_camera/image_raw
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

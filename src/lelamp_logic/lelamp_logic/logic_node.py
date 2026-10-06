@@ -4,24 +4,26 @@ Runs a small state machine (behaviors.py: idle, attentive, look_around, focus).
 The current state sets goals on LampMotion (motion.py), which eases the joints
 there every tick. The light color comes from the current state.
 
+face_rate_hz times a second it asks face_node whether someone is looking at
+the lamp (the detect_faces service); that sets attentive.
+
 While looking around, the lamp asks object_node what it can see (the
 detect_objects service) and remembers where each object is in base_link
 (object_memory.py). Asking for an object by name makes it look back at it.
 
-Inputs:  /lelamp/face/looking         (std_msgs/Bool)
-         /lelamp/look_at_object       (std_msgs/String, e.g. "clock")
-Uses:    /lelamp/detect_objects       (lelamp_interfaces/DetectObjects, object_node)
+Inputs:  /lelamp/look_at_object       (std_msgs/String, e.g. "clock")
+Uses:    /lelamp/detect_faces         (lelamp_interfaces/DetectFaces, face_node)
+         /lelamp/detect_objects       (lelamp_interfaces/DetectObjects, object_node)
 Outputs: /lelamp/joint_commands       (sensor_msgs/JointState, target positions)
          /lelamp/light                (std_msgs/ColorRGBA)
 """
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, ColorRGBA, String
+from std_msgs.msg import ColorRGBA, String
 
-from lelamp_interfaces.srv import DetectObjects
+from lelamp_interfaces.srv import DetectFaces, DetectObjects
 from lelamp_logic.behaviors import Attentive, Focus, Idle, LookAround, StateMachine
 from lelamp_logic.motion import LampMotion
 from lelamp_logic.object_memory import ObjectMemory
@@ -32,13 +34,17 @@ class LogicNode(Node):
         super().__init__('logic_node')
         self.declare_parameter('rate_hz', 30.0)
         self.declare_parameter('idle_motion', True)  # breathing on top of every pose
+        self.declare_parameter('face_rate_hz', 10.0)  # how often to check for faces
 
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.dt = 1.0 / float(gp('rate_hz'))
         self.motion = LampMotion(breathing=bool(gp('idle_motion')))
 
         self.attentive = False # When user looks at lamp/webcam, lamp becomes attentive
+        self.faces = []  # latest DetectedFace list from face_node, largest first
         self.focus_target = None  # (x, y, z) the focus behavior looks at
+        self.face_client = self.create_client(DetectFaces, 'lelamp/detect_faces')
+        self.checking_faces = False  # a detect_faces call is in flight
 
         self.memory = ObjectMemory()  # fresh every run
         self.detect_client = self.create_client(DetectObjects, 'lelamp/detect_objects')
@@ -50,18 +56,32 @@ class LogicNode(Node):
             start='idle',
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
-        self.create_subscription(Bool, 'lelamp/face/looking', self._looking,
-                                 qos_profile_sensor_data)
         self.create_subscription(String, 'lelamp/look_at_object', self._on_look_at_object, 10)
         self.cmd_pub = self.create_publisher(JointState, 'lelamp/joint_commands', 10)
         self.color_pub = self.create_publisher(ColorRGBA, 'lelamp/light', 10)
         self.create_timer(self.dt, self._think)
+        self.create_timer(1.0 / float(gp('face_rate_hz')), self.check_faces)
 
-    def _looking(self, msg):
-        if(msg.data):
-            self.attentive = True
-        else:
-            self.attentive = False
+    # --- faces ---
+
+    def check_faces(self):
+        """Ask face_node about the newest frame; the answer sets attentive."""
+        if self.checking_faces or not self.face_client.service_is_ready():
+            return
+        self.checking_faces = True
+        self.face_client.call_async(DetectFaces.Request()).add_done_callback(self._on_faces)
+
+    def _on_faces(self, future):
+        self.checking_faces = False
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'detect_faces failed: {e}', throttle_duration_sec=5.0)
+            return
+        if not res.success:
+            return
+        self.faces = res.faces
+        self.attentive = res.looking
 
     def _on_look_at_object(self, msg):
         self.look_at_object(msg.data)

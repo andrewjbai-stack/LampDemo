@@ -1,0 +1,7 @@
+# Find faces in the newest camera frame.
+---
+bool success                       # false: no camera frame yet
+string message                     # short summary
+std_msgs/Header header             # stamp and frame of the image used
+bool looking                       # the largest face is looking at the camera (with hysteresis)
+lelamp_interfaces/DetectedFace[] faces   # largest first
