@@ -1,22 +1,30 @@
 """Stub for the LeLamp's "brain".
 
-Runs a small state machine (behaviors.py: idle, attentive, look_around). The
-current state sets goals on LampMotion (motion.py), which eases the joints there
-every tick. The light color comes from the current state.
+Runs a small state machine (behaviors.py: idle, attentive, look_around, focus).
+The current state sets goals on LampMotion (motion.py), which eases the joints
+there every tick. The light color comes from the current state.
 
-Inputs:  /lelamp/face/looking     (std_msgs/Bool)
-Outputs: /lelamp/joint_commands   (sensor_msgs/JointState, target positions)
-         /lelamp/light            (std_msgs/ColorRGBA)
+While looking around, the lamp asks object_node what it can see (the
+detect_objects service) and remembers where each object is in base_link
+(object_memory.py). Asking for an object by name makes it look back at it.
+
+Inputs:  /lelamp/face/looking         (std_msgs/Bool)
+         /lelamp/look_at_object       (std_msgs/String, e.g. "clock")
+Uses:    /lelamp/detect_objects       (lelamp_interfaces/DetectObjects, object_node)
+Outputs: /lelamp/joint_commands       (sensor_msgs/JointState, target positions)
+         /lelamp/light                (std_msgs/ColorRGBA)
 """
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image, JointState
-from std_msgs.msg import Bool, ColorRGBA
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool, ColorRGBA, String
 
-from lelamp_logic.behaviors import Attentive, Idle, LookAround, StateMachine
+from lelamp_interfaces.srv import DetectObjects
+from lelamp_logic.behaviors import Attentive, Focus, Idle, LookAround, StateMachine
 from lelamp_logic.motion import LampMotion
+from lelamp_logic.object_memory import ObjectMemory
 
 
 class LogicNode(Node):
@@ -25,20 +33,26 @@ class LogicNode(Node):
         self.declare_parameter('rate_hz', 30.0)
         self.declare_parameter('idle_motion', True)  # breathing on top of every pose
 
-        self.dt = 1.0 / float(self.get_parameter('rate_hz').value)
-        self.motion = LampMotion(breathing=bool(self.get_parameter('idle_motion').value))
+        gp = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.dt = 1.0 / float(gp('rate_hz'))
+        self.motion = LampMotion(breathing=bool(gp('idle_motion')))
 
         self.attentive = False # When user looks at lamp/webcam, lamp becomes attentive
+        self.focus_target = None  # (x, y, z) the focus behavior looks at
+
+        self.memory = ObjectMemory()  # fresh every run
+        self.detect_client = self.create_client(DetectObjects, 'lelamp/detect_objects')
+        self.detecting = False  # a detect_objects call is in flight
 
         self.brain = StateMachine(
-            self, {'idle': Idle(), 'attentive': Attentive(), 'look_around': LookAround()},
+            self, {'idle': Idle(), 'attentive': Attentive(), 'look_around': LookAround(),
+                   'focus': Focus()},
             start='idle',
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
-        #self.create_subscription(Image, 'camera/image_raw', self._on_image,
-        #                         qos_profile_sensor_data)
         self.create_subscription(Bool, 'lelamp/face/looking', self._looking,
                                  qos_profile_sensor_data)
+        self.create_subscription(String, 'lelamp/look_at_object', self._on_look_at_object, 10)
         self.cmd_pub = self.create_publisher(JointState, 'lelamp/joint_commands', 10)
         self.color_pub = self.create_publisher(ColorRGBA, 'lelamp/light', 10)
         self.create_timer(self.dt, self._think)
@@ -49,6 +63,45 @@ class LogicNode(Node):
         else:
             self.attentive = False
 
+    def _on_look_at_object(self, msg):
+        self.look_at_object(msg.data)
+
+    # --- object memory ---
+
+    def snapshot(self):
+        """Ask object_node what's in view now and remember it. Returns at once
+        (the answer arrives in _on_detected); False if skipped."""
+        if self.detecting or not self.detect_client.service_is_ready():
+            return False
+        self.detecting = True
+        self.detect_client.call_async(DetectObjects.Request()).add_done_callback(self._on_detected)
+        return True
+
+    def _on_detected(self, future):
+        self.detecting = False
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'detect_objects failed: {e}')
+            return
+        if not res.success:
+            self.get_logger().warn(f'detect_objects: {res.message}', throttle_duration_sec=5.0)
+            return
+        for obj in res.objects:
+            p = obj.position
+            self.memory.add(obj.name, (p.x, p.y, p.z), obj.confidence)
+        if res.objects:
+            self.get_logger().info(f'saw: {res.message}')
+
+    def look_at_object(self, name):
+        """Look at a remembered object for a while. False if it's never been seen."""
+        point = self.memory.find(name)
+        if point is None:
+            self.get_logger().info(f"haven't seen '{name}' (known: {', '.join(self.memory.names())})")
+            return False
+        self.focus_target = point
+        self.brain.go('focus')
+        return True
 
     def _think(self):
         # The current state decides what to do; behaviors live in behaviors.py.

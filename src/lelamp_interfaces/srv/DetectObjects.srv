@@ -1,0 +1,7 @@
+# Detect objects in the newest camera frame.
+---
+bool success                       # false: no frame, no camera pose, or no detector
+string message                     # why it failed, or a short summary
+std_msgs/Header header             # stamp of the frame used; frame_id is base_link
+geometry_msgs/Point camera_origin  # where the camera was, in base_link
+lelamp_interfaces/DetectedObject[] objects

@@ -5,8 +5,9 @@ lamp switches to it, and `update()` runs every tick and returns the name of the
 next behavior, or None to stay. All the rules for leaving a behavior live in
 that behavior, so adding a new one doesn't touch the others.
 
-`lamp` is whatever owns the state (logic_node): it needs `.motion` (LampMotion)
-and `.attentive` (bool).
+`lamp` is whatever owns the state (logic_node): it needs `.motion` (LampMotion),
+`.attentive` (bool), `.snapshot()` (remember the objects in view) and
+`.focus_target` (x, y, z point for the focus behavior).
 
 Scripted animations subclass Animation and write `script()` as a generator that
 yields how many seconds to wait before its next step:
@@ -100,12 +101,40 @@ class Idle(Behavior):
 
 
 class LookAround(Animation):
-    """Glance at a few random spots, then settle back to idle."""
+    """Sweep the room, stopping at each heading to take a snapshot (the object
+    memory), then settle back to idle. Starts from whichever end is nearer."""
+    HEADINGS = (-140.0, -95.0, -50.0, -5.0, 40.0, 85.0, 130.0)  # deg, + = lamp's left
 
     def script(self, lamp):
-        for _ in range(random.randint(3, 6)):
-            lamp.motion.look(random.uniform(-70.0, 70.0), random.uniform(-30.0, 5.0))
-            yield random.uniform(1.0, 3.0)
+        headings = list(self.HEADINGS)
+        if random.random() < 0.5:
+            headings.reverse()
+        for yaw in headings:
+            lamp.motion.look(yaw + random.uniform(-5.0, 5.0), random.uniform(-15.0, 0.0))
+            yield 0.5
+            waited = 0.0
+            while not lamp.motion.settled() and waited < 3.0:
+                yield 0.1
+                waited += 0.1
+            yield 0.3  # let a camera frame from the new pose arrive
+            lamp.snapshot()
+            yield random.uniform(0.5, 1.0)
+
+
+class Focus(Behavior):
+    """Look at lamp.focus_target (a remembered object) for a while."""
+
+    def __init__(self, hold=4.0):
+        self.hold = hold
+
+    def enter(self, lamp):
+        self.elapsed = 0.0
+        lamp.motion.move_to('lean_in')
+        lamp.motion.look_at(*lamp.focus_target)
+
+    def update(self, lamp, dt):
+        self.elapsed += dt
+        return 'idle' if self.elapsed > self.hold else None
 
 
 class StateMachine:
