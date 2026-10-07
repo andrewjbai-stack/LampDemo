@@ -6,9 +6,8 @@ Plain Python (no ROS), so llm_node and the benchmark share it:
     parser.parse('lamp, look at the clock and turn blue', known=['clock', 'cup'])
     # -> [('look_at_object', 'clock'), ('set_light', 'blue')], 'llm'
 
-Simple phrases ("look at the cup", "red light") are matched by keywords first
-and never reach the model. Everything else goes to the LLM, whose output is
-forced by a grammar into JSON that can only name these tools:
+Every phrase goes to the LLM, whose output is forced by a grammar into JSON
+that can only name these tools:
 
     look_at_object(object)   an object the lamp has seen
     scan_room()              look around the room
@@ -91,12 +90,12 @@ def normalize(text):
 
 class CommandParser:
     def __init__(self, model_path, n_threads=2, n_ctx=1024):
-        from llama_cpp import Llama  # imported here so quick_parse works without it
+        from llama_cpp import Llama  # imported here so the module loads without it
         self.llm = Llama(model_path=os.path.expanduser(model_path), n_ctx=n_ctx,
                          n_threads=n_threads, n_threads_batch=n_threads,
                          n_gpu_layers=0, verbose=False)
         self.last_raw = ''
-        self.parse('hello', use_keywords=False)  # warm up and cache the system prompt
+        self.parse('hello')  # warm up and cache the system prompt
 
     def ask_llm(self, text, known=()):
         seen = ', '.join(known) if known else 'nothing yet'
@@ -118,9 +117,9 @@ class CommandParser:
                 cmds.append(cmd)
         return cmds
 
-    def parse(self, text, known=(), use_keywords=True):
+    def parse(self, text, known=()):
         """(commands, source, seconds). commands is a list of (tool, arg);
-        source is 'keywords' or 'llm'."""
+        source is always 'llm'."""
         t0 = time.monotonic()
         cmds, source = self.ask_llm(normalize(text), known), 'llm'
         return cmds, source, time.monotonic() - t0

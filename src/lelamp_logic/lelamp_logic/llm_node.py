@@ -1,8 +1,8 @@
 """Turns heard phrases into lamp commands: a small LLM on the CPU, behind a service.
 
 logic_node sends each phrase voice_node hears, plus the names of the objects it
-remembers, and gets back the commands to run. Simple phrases are matched by
-keywords; the rest go to Qwen2.5 through llama.cpp (command_parser.py).
+remembers, and gets back the commands to run. Every phrase goes to Qwen2.5
+through llama.cpp (command_parser.py).
 
     ros2 service call /lelamp/parse_command lelamp_interfaces/srv/ParseCommand \\
         "{text: 'lamp, look at the clock and turn blue', known_objects: [clock]}"
@@ -42,7 +42,7 @@ class LLMNode(Node):
         cmds, res.source, res.seconds = self.parser.parse(req.text, list(req.known_objects))
         res.commands = [LampCommand(tool=t, arg=a) for t, a in cmds]
         res.success = True
-        res.message = self.parser.last_raw if res.source == 'llm' else ''
+        res.message = self.parser.last_raw
         self.get_logger().info(f'"{req.text}" -> {cmds or "nothing"} '
                                f'({res.source}, {res.seconds:.2f}s)')
         return res

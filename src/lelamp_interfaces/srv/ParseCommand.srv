@@ -4,6 +4,6 @@ string[] known_objects            # names in the object memory, so it can pick o
 ---
 bool success                      # false: the model isn't loaded
 string message                    # why it failed, or the raw model output
-string source                     # "keywords" or "llm"
+string source                     # always "llm"
 float32 seconds                   # time spent parsing
 lelamp_interfaces/LampCommand[] commands   # in order; empty if nothing was asked

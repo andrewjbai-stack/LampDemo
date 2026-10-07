@@ -1,7 +1,7 @@
 """Furniture and objects around the lamp's room, for the head camera to look at.
 
 add_props(spec) adds them before compiling; paint_props(model) then draws the
-poster and clock-face pictures into their textures (call it once after compile,
+clock-face picture into its texture (call it once after compile,
 before the viewer or a renderer is created, so both upload the painted pixels).
 
 Room frame (same as mujoco_sim_node): the lamp base is at the origin facing -x,
@@ -26,10 +26,7 @@ PLANT_POS = (1.6, 1.7)         # behind, to the right
 # on the desk
 PAPER_POS = (-0.42, 0.25)
 # On a wall: (x, y, z of the centre, yaw); at yaw 0 the picture faces +x.
-POSTER_POS = (0.6, -WALL, 0.85, 90)   # left wall
-POSTER_SIZE = (0.9, 1.3)
-POSTER_TEX = (240, 340)
-CLOCK_POS = (WALL, -0.6, 1.1, 180)    # wall behind the lamp
+CLOCK_POS = (0.6, -WALL, 1.1, 90)     # left wall
 CLOCK_R = 0.3
 CLOCK_TEX = 256
 
@@ -84,11 +81,11 @@ def _materials(spec):
     flat('paper', [0.96, 0.96, 0.93, 1], 0.05)
     flat('ink', [0.25, 0.25, 0.28, 1], 0.0)
     flat('clock_rim', [0.12, 0.12, 0.13, 1], 0.5, 0.6)
-    for name, (w, h) in (('poster', POSTER_TEX), ('clock_face', (CLOCK_TEX, CLOCK_TEX))):
-        spec.add_texture(name=name, type=mujoco.mjtTexture.mjTEXTURE_2D,
-                         builtin=mujoco.mjtBuiltin.mjBUILTIN_FLAT,
-                         width=w, height=h, rgb1=[1, 1, 1])
-        spec.add_material(name=name, textures=['', name], specular=0.05, emission=0.15)
+    spec.add_texture(name='clock_face', type=mujoco.mjtTexture.mjTEXTURE_2D,
+                     builtin=mujoco.mjtBuiltin.mjBUILTIN_FLAT,
+                     width=CLOCK_TEX, height=CLOCK_TEX, rgb1=[1, 1, 1])
+    spec.add_material(name='clock_face', textures=['', 'clock_face'], specular=0.05,
+                      emission=0.15)
 
 
 def _bookshelf(spec):
@@ -191,23 +188,6 @@ def _paper(spec):
              material='ink')
 
 
-def _wall_quad(spec, name, w, h):
-    """Mesh quad in the y-z plane facing +x, texture row 0 at the top."""
-    spec.add_mesh(name=name, inertia=mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL,
-                  uservert=[0, -w, -h, 0, w, -h, 0, w, h, 0, -w, h],
-                  usertexcoord=[0, 1, 1, 1, 1, 0, 0, 0],
-                  userface=[0, 1, 2, 0, 2, 3])
-
-
-def _poster(spec):
-    w, h = POSTER_SIZE[0] / 2, POSTER_SIZE[1] / 2
-    _wall_quad(spec, 'poster', w, h)
-    x, y, z, yaw = POSTER_POS
-    poster = spec.worldbody.add_body(name='poster', pos=[x, y, z], quat=_quat_z(yaw))
-    _add(poster, MESH, [0, 0, 0], [0.01, 0, 0], meshname='poster', material='poster')
-    _add(poster, BOX, [0.004, w + 0.02, h + 0.02], [0.002, 0, 0], material='clock_rim')
-
-
 def _clock(spec):
     n = 48
     verts, uv, faces = [0, 0, 0], [0.5, 0.5], []
@@ -227,38 +207,16 @@ def _clock(spec):
 
 def add_props(spec):
     """Bookshelf with books and a trophy, armchair, potted plant, paper on the
-    desk, a poster and a clock, spread around the lamp (none behind the TV)."""
+    desk and a clock, spread around the lamp (none behind the TV)."""
     _materials(spec)
     _bookshelf(spec)
     _armchair(spec)
     _plant(spec)
     _paper(spec)
-    _poster(spec)
     _clock(spec)
 
 
 # --- pictures, drawn with numpy (no image files) ---
-
-def _poster_image(w, h):
-    """Mountains at sunset, with a title band at the bottom."""
-    yy, xx = np.mgrid[0:h, 0:w] / np.array([h, w])[:, None, None]
-    top, bottom = np.array([0.25, 0.15, 0.45]), np.array([1.0, 0.6, 0.3])
-    img = top + (bottom - top) * np.clip(yy / 0.7, 0, 1)[..., None]
-    sun = (xx - 0.62) ** 2 * (w / h) ** 2 + (yy - 0.42) ** 2 < 0.1 ** 2
-    img[sun] = [1.0, 0.88, 0.55]
-    ridges = [(0.5, 0.12, 2.0, [0.45, 0.25, 0.4]), (0.6, 0.08, 3.3, [0.3, 0.16, 0.3]),
-              (0.7, 0.06, 5.1, [0.16, 0.1, 0.18])]
-    for base, amp, freq, color in ridges:
-        line = base - amp * np.abs(np.sin(freq * np.pi * xx + base * 7)) \
-               - 0.02 * np.sin(17 * xx + base)
-        img[yy > line] = color
-    img[yy > 0.84] = [0.95, 0.93, 0.88]
-    band = (yy > 0.88) & (yy < 0.92) & (xx > 0.2) & (xx < 0.8)
-    img[band] = [0.2, 0.15, 0.2]
-    small = (yy > 0.94) & (yy < 0.955) & (xx > 0.33) & (xx < 0.67)
-    img[small] = [0.45, 0.4, 0.42]
-    return (img * 255).astype(np.uint8)
-
 
 def _clock_image(s, hour=10, minute=10, second=37):
     yy, xx = (np.mgrid[0:s, 0:s] + 0.5) / s * 2 - 1     # -1..1, y down
@@ -286,8 +244,6 @@ def _clock_image(s, hour=10, minute=10, second=37):
 
 
 def paint_props(model):
-    for name, img in (('poster', _poster_image(*POSTER_TEX)),
-                      ('clock_face', _clock_image(CLOCK_TEX))):
-        tex = model.texture(name).id
-        adr = model.tex_adr[tex]
-        model.tex_data[adr:adr + img.size] = img.ravel()
+    img = _clock_image(CLOCK_TEX)
+    adr = model.tex_adr[model.texture('clock_face').id]
+    model.tex_data[adr:adr + img.size] = img.ravel()

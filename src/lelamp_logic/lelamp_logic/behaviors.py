@@ -19,7 +19,10 @@ yields how many seconds to wait before its next step:
             lamp.motion.look(0, 0)
             yield 0.4
 """
+import math
 import random
+
+from lelamp_logic.motion import aim
 
 CENTER_TV_POS = (-2.0, 0.0, 0.35)
 
@@ -28,7 +31,7 @@ ATTENTIVE_LIGHT = (1.0, 1.0, 1.0, 1.0)
 
 
 class Behavior:
-    color = PASSIVE_LIGHT  # light colour while this behavior runs
+    color = None  # light colour while this behavior runs
 
     def enter(self, lamp):
         pass
@@ -40,10 +43,11 @@ class Behavior:
 class Animation(Behavior):
     """A behavior driven by a generator script. Goes to `then` when it finishes."""
     then = 'idle'
+    look_for_attentive = False
 
     def interrupt(self, lamp):
         """Name of a behavior to cut to mid-animation, or None. Checked every tick."""
-        return 'attentive' if lamp.attentive else None
+        return 'attentive' if lamp.attentive and self.look_for_attentive else None
 
     def script(self, lamp):
         yield 0.0
@@ -84,8 +88,9 @@ class Attentive(Behavior):
 
 class Idle(Behavior):
     """Resting. Gets bored and looks around after a while."""
+    color = PASSIVE_LIGHT
 
-    def __init__(self, bored_after=5.0):
+    def __init__(self, bored_after=15.0):
         self.bored_after = bored_after
 
     def enter(self, lamp):
@@ -97,13 +102,15 @@ class Idle(Behavior):
         if lamp.attentive:
             return 'attentive'
         self.elapsed += dt
-        return 'look_around' if self.elapsed > self.bored_after else None
+        return 'bored' if self.elapsed > self.bored_after else None
 
 
 class LookAround(Animation):
     """Sweep the room, stopping at each heading to take a snapshot (the object
     memory), then settle back to idle. Starts from whichever end is nearer."""
     HEADINGS = (-140.0, -95.0, -50.0, -5.0, 40.0, 85.0, 130.0)  # deg, + = lamp's left
+
+    color = ATTENTIVE_LIGHT
 
     def script(self, lamp):
         headings = list(self.HEADINGS)
@@ -120,9 +127,76 @@ class LookAround(Animation):
             lamp.snapshot()
             yield random.uniform(0.5, 1.0)
 
+class Bored(Animation):
+    """Something to do while nobody's around. Each time, plays one of a few
+    bored animations at random, then goes back to idle:
+
+    - glance: two quick looks near wherever the lamp was already looking
+    - stretch: reach the arm out and swing all the way to one side, then all
+      the way to the other, then come back
+    """
+    color = PASSIVE_LIGHT
+
+    look_for_attentive = True
+
+    STRETCH_POSTURE = (-0.6, 0.0)  # (shoulder, elbow) arm out straight
+    STRETCH_YAW = 135.0            # deg each side (base yaw limit is ~149)
+
+    def heading(self, lamp):
+        """Where the lamp is looking now, as (yaw, pitch) degrees for look()."""
+        t = lamp.motion.look_target
+        if t is None:
+            return 0.0, 0.0
+        if t[0] == 'point':
+            shoulder = lamp.motion.springs['shoulder_pitch_joint'].x
+            elbow = lamp.motion.springs['elbow_pitch_joint'].x
+            yaw, pitch = aim(shoulder, elbow, *t[1:])
+            up = shoulder + elbow - pitch
+        else:
+            _, yaw, up = t
+        return math.degrees(yaw), math.degrees(up)
+
+    def wait_settled(self, lamp, timeout=4.0):
+        """Yield until the lamp stops moving (settled() only checks speed, so
+        give it a moment to get going first)."""
+        yield 0.4
+        waited = 0.4
+        while not lamp.motion.settled() and waited < timeout:
+            yield 0.1
+            waited += 0.1
+
+    def script(self, lamp):
+        yield from random.choice((self.glance, self.stretch))(lamp)
+
+    def glance(self, lamp):
+        yaw, pitch = self.heading(lamp)
+        side = random.choice((-1.0, 1.0))
+        for _ in range(2):
+            lamp.motion.look(yaw + side * random.uniform(15.0, 30.0),
+                             pitch + random.uniform(-10.0, 10.0))
+            side = -side if random.random() < 0.7 else side  # usually the other way
+            yield random.uniform(1.0, 2.0)
+        lamp.motion.look(yaw, pitch)
+        yield 0.6
+
+    def stretch(self, lamp):
+        yaw, pitch = self.heading(lamp)
+        posture = lamp.motion.posture
+        side = random.choice((-1.0, 1.0))
+        lamp.motion.move_to(*self.STRETCH_POSTURE)
+        for s in (side, -side):
+            lamp.motion.look(s * self.STRETCH_YAW, 10.0)
+            yield from self.wait_settled(lamp)
+            yield random.uniform(0.8, 1.2)  # hold the stretch
+        lamp.motion.move_to(*posture)
+        lamp.motion.look(yaw, pitch)
+        yield from self.wait_settled(lamp)
+
 
 class Focus(Behavior):
     """Look at lamp.focus_target (a remembered object) for a while."""
+
+    color = ATTENTIVE_LIGHT
 
     def __init__(self, hold=4.0):
         self.hold = hold
@@ -140,6 +214,8 @@ class Focus(Behavior):
 class Obey(Behavior):
     """Doing what it was told (logic_node sets the motion before switching here).
     Holds that pose for a while, without getting bored or attentive."""
+    
+    color = ATTENTIVE_LIGHT
 
     def __init__(self, hold=8.0):
         self.hold = hold
@@ -151,6 +227,25 @@ class Obey(Behavior):
         self.elapsed += dt
         return 'idle' if self.elapsed > self.hold else None
 
+class Thinking(Behavior):
+    """The lamp is waiting for the llm to respond, and assumes a thinking pose"""
+    color = PASSIVE_LIGHT
+
+    def __init__(self, grace=5.0):
+        self.grace = grace 
+
+    def enter(self, lamp):
+        self.thinking_for = 0.0
+        lamp.motion.move_to('sit_back')
+
+        t = lamp.motion.look_target
+        if t and t[0] == 'point':
+            _, x, y, z = t
+            lamp.motion.look_at(x, y, z - 1)
+
+    def update(self, lamp, dt):
+        self.thinking_for = self.thinking_for + dt
+        return 'idle' if self.thinking_for > self.grace else None
 
 class StateMachine:
     def __init__(self, lamp, behaviors, start, on_change=None):

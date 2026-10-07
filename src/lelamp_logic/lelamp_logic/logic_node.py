@@ -33,7 +33,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import ColorRGBA, String
 
 from lelamp_interfaces.srv import DetectFaces, DetectObjects, ParseCommand
-from lelamp_logic.behaviors import Attentive, Focus, Idle, LookAround, Obey, StateMachine
+from lelamp_logic.behaviors import Attentive, Focus, Idle, LookAround, Obey, Bored, StateMachine, Thinking
 from lelamp_logic.motion import LampMotion
 from lelamp_logic.object_memory import ObjectMemory
 
@@ -70,11 +70,13 @@ class LogicNode(Node):
 
         self.parse_client = self.create_client(ParseCommand, 'lelamp/parse_command')
         self.thinking = False  # a parse_command call is in flight
+        self.thinking_color_flag = False 
+        self.thinking_color = (0.0, 0.0, 1.0, 1.0)
         self.light = None  # (r, g, b) asked for by voice, or 'off'; None = state's own
 
         self.brain = StateMachine(
             self, {'idle': Idle(), 'attentive': Attentive(), 'look_around': LookAround(),
-                   'focus': Focus(), 'obey': Obey()},
+                   'focus': Focus(), 'obey': Obey(), 'bored': Bored(), 'thinking': Thinking()},
             start='idle',
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
@@ -124,18 +126,29 @@ class LogicNode(Node):
         req = ParseCommand.Request(text=msg.data, known_objects=self.memory.names())
         self.parse_client.call_async(req).add_done_callback(self._on_commands)
 
+        self.brain.go('thinking')
+        
+        # When false the lamp light dims, when true is brightens which allows for the thinking light pattern
+        self.thinking_color_flag = False 
+        self.thinking_color = (0.9, 0.9, 1.0, 1.0)
+
     def _on_commands(self, future):
         self.thinking = False
         try:
             res = future.result()
         except Exception as e:
             self.get_logger().error(f'parse_command failed: {e}')
+            self.brain.go('idle')
             return
         if not res.success:
             self.get_logger().warn(f'parse_command: {res.message}')
+            self.brain.go('idle')
             return
         for c in res.commands:
             self.run_command(c.tool, c.arg)
+        # No command picked a new state (e.g. only set_light): stop thinking.
+        if self.brain.name == 'thinking':
+            self.brain.go('idle')
 
     def run_command(self, tool, arg):
         """Do one command from llm_node. False if it can't."""
@@ -202,12 +215,27 @@ class LogicNode(Node):
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.name, cmd.position = self.motion.step(self.dt)
         self.cmd_pub.publish(cmd)
-
+        # The state sets the brightness; a voice color replaces the state's color.
         r, g, b, a = self.brain.current.color
         if self.light == 'off':
             a = 0.0
         elif self.light:
             r, g, b = self.light
+
+        if self.brain.name == 'thinking':
+            r, g, b, a = self.thinking_color
+            if self.thinking_color_flag == False:
+                if(self.thinking_color[0] < 0.4):
+                    self.thinking_color_flag = True
+                rg_value = max(0.0, min(r - 0.05, 1.0))
+
+            if self.thinking_color_flag == True:
+                if(self.thinking_color[0] > 0.9):
+                    self.thinking_color_flag = False
+                rg_value = max(0.0, min(r + 0.05, 1.0))
+            self.thinking_color = (rg_value, rg_value, b, a)
+            r, g, b, a = self.thinking_color
+
         self.color_pub.publish(ColorRGBA(r=r, g=g, b=b, a=a))
 
 

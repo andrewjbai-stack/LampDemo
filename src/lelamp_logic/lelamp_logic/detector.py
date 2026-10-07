@@ -8,8 +8,8 @@ detect() then returns what it found in one image:
         ...
 
 LABELS maps the text prompt YOLO-World searches for to the name the lamp
-remembers it by, so several prompts can feed one name ('framed picture' finds
-posters better than 'poster' does).
+remembers it by, so several prompts can feed one name ('gold trophy cup' and
+'trophy' both mean the trophy).
 
 pixel_ray() and locate() turn a box into a point in base_link, given the
 camera pose (from tf):
@@ -19,7 +19,7 @@ camera pose (from tf):
 
 One image gives a direction, not a distance. locate() gets the distance from
 where the bottom of the box meets the desk or floor, which is right for things
-standing on them; anything else (wall clock, poster) goes DEFAULT_DIST along
+standing on them; anything else (the wall clock) goes DEFAULT_DIST along
 the ray. Looking back at it is accurate either way, because the head is close
 to where it was when it saw the object.
 
@@ -37,8 +37,6 @@ LABELS = {
     'book': 'book',
     'trophy': 'trophy',
     'gold trophy cup': 'trophy',
-    'poster': 'poster',
-    'framed picture': 'poster',
     'potted plant': 'potted plant',
     'paper': 'paper',
     'sheet of paper': 'paper',
