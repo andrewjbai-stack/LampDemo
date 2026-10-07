@@ -7,7 +7,7 @@ package_name = 'lelamp_logic'
 setup(
     name=package_name,
     version='0.1.0',
-    packages=[package_name],
+    packages=[package_name, package_name + '.logic_node'],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
@@ -21,7 +21,8 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'logic_node = lelamp_logic.logic_node:main',
+            'logic_node = lelamp_logic.logic_node.node:main',
+            'motion_node = lelamp_logic.motion_node:main',
             'face_node = lelamp_logic.face_node:main',
             'object_node = lelamp_logic.object_node:main',
             'voice_node = lelamp_logic.voice_node:main',

@@ -1,6 +1,15 @@
-"""Move and look functions for the LeLamp, with smooth easing.
+"""The LeLamp's body: eases the joints toward look and move goals on its own
+timer, so motion stays smooth whatever the other nodes are doing.
 
-Plain Python (no ROS), so logic_node and the voice tools can share one object:
+Other nodes set goals through two services and read back what it's doing on
+/lelamp/motion_state (logic_node wraps all of this in motion_client.py).
+
+Services: /lelamp/look  (lelamp_interfaces/Look: aim at a point or by angle)
+          /lelamp/move  (lelamp_interfaces/Move: posture by name, angles or reach)
+Outputs:  /lelamp/joint_commands (sensor_msgs/JointState, target positions)
+          /lelamp/motion_state   (lelamp_interfaces/MotionState, every tick)
+
+LampMotion does the easing, and works without ROS too:
 
     motion = LampMotion()
     motion.look_at(0.4, 0.2, 0.1)   # aim the head at a point (base_link, metres)
@@ -18,6 +27,14 @@ base -X, positive base yaw turns it to its left (counter-clockwise from above),
 and positive head pitch tilts the head down.
 """
 import math
+
+import rclpy
+from rclpy.executors import ExternalShutdownException
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+
+from lelamp_interfaces.msg import MotionState
+from lelamp_interfaces.srv import Look, Move
 
 JOINTS = ['base_yaw_joint', 'shoulder_pitch_joint', 'elbow_pitch_joint',
           'neck_yaw_joint', 'head_pitch_joint']
@@ -141,9 +158,26 @@ class LampMotion:
         self.move_to(*posture)
         return True
 
-    def settled(self, tol=0.02):
-        """True once every joint is close to where it's heading and nearly still."""
-        return all(abs(s.v) < tol for s in self.springs.values())
+    def settled(self, tol=0.02, pos_tol=0.05):
+        """True once every joint is nearly still (under tol rad/s) and within
+        pos_tol rad (about 3 deg, enough to cover breathing) of its target.
+        Targets are clamped to the joint limits, so an out-of-reach look still
+        settles at the limit."""
+        goal = self.targets()
+        return all(abs(s.v) < tol and abs(s.x - _clamp(n, goal[n])) < pos_tol
+                   for n, s in self.springs.items())
+
+    def heading(self):
+        """Where the head is aimed now, as (yaw, pitch) degrees for look()."""
+        t = self.look_target
+        if t[0] == 'point':
+            shoulder = self.springs['shoulder_pitch_joint'].x
+            elbow = self.springs['elbow_pitch_joint'].x
+            yaw, pitch = aim(shoulder, elbow, *t[1:])
+            up = shoulder + elbow - pitch
+        else:
+            _, yaw, up = t
+        return math.degrees(yaw), math.degrees(up)
 
     # --- per tick ---
 
@@ -172,3 +206,86 @@ class LampMotion:
             goal['elbow_pitch_joint'] += 0.03 * math.sin(0.5 * self.t + 0.6)
         positions = [_clamp(n, self.springs[n].step(_clamp(n, goal[n]), dt)) for n in JOINTS]
         return list(JOINTS), positions
+
+
+class MotionNode(Node):
+    def __init__(self):
+        super().__init__('motion_node')
+        self.declare_parameter('rate_hz', 30.0)
+        self.declare_parameter('idle_motion', True)  # breathing on top of every pose
+
+        gp = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.dt = 1.0 / float(gp('rate_hz'))
+        self.motion = LampMotion(breathing=bool(gp('idle_motion')))
+        self.goal_id = 0  # counts accepted Look and Move goals
+
+        self.create_service(Look, 'lelamp/look', self._on_look)
+        self.create_service(Move, 'lelamp/move', self._on_move)
+        self.cmd_pub = self.create_publisher(JointState, 'lelamp/joint_commands', 10)
+        self.state_pub = self.create_publisher(MotionState, 'lelamp/motion_state', 10)
+        self.create_timer(self.dt, self._tick)
+
+    def _accept(self, res, message):
+        self.goal_id += 1
+        res.success, res.message, res.goal_id = True, message, self.goal_id
+        return res
+
+    def _on_look(self, req, res):
+        if req.mode == 'point':
+            self.motion.look_at(req.x, req.y, req.z)
+            return self._accept(res, f'look at ({req.x:.2f}, {req.y:.2f}, {req.z:.2f})')
+        if req.mode == 'angle':
+            self.motion.look(req.yaw, req.pitch)
+            return self._accept(res, f'look {req.yaw:.0f}, {req.pitch:.0f} deg')
+        res.success, res.message = False, f'unknown look mode "{req.mode}"'
+        return res
+
+    def _on_move(self, req, res):
+        if req.mode == 'posture':
+            if req.posture not in POSTURES:
+                res.success, res.message = False, f'unknown posture "{req.posture}"'
+                return res
+            self.motion.move_to(req.posture)
+            return self._accept(res, req.posture)
+        if req.mode == 'angles':
+            self.motion.move_to(req.shoulder, req.elbow)
+            return self._accept(res, f'shoulder {req.shoulder:.2f}, elbow {req.elbow:.2f}')
+        if req.mode == 'reach':
+            if not self.motion.reach(req.forward, req.height):
+                res.success, res.message = False, 'out of reach'
+                return res
+            return self._accept(res, f'reach {req.forward:.2f}, {req.height:.2f}')
+        res.success, res.message = False, f'unknown move mode "{req.mode}"'
+        return res
+
+    def _tick(self):
+        cmd = JointState()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        cmd.name, cmd.position = self.motion.step(self.dt)
+        self.cmd_pub.publish(cmd)
+
+        state = MotionState(goal_id=self.goal_id, settled=self.motion.settled())
+        state.look_yaw, state.look_pitch = self.motion.heading()
+        target = self.motion.look_target
+        state.look_mode = target[0]
+        if target[0] == 'point':
+            state.look_point.x, state.look_point.y, state.look_point.z = target[1:]
+        state.shoulder, state.elbow = self.motion.posture
+        self.state_pub.publish(state)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MotionNode()
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

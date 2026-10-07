@@ -10,8 +10,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DetectedFace.msg"
   "msg/DetectedObject.msg"
   "msg/LampCommand.msg"
+  "msg/MotionState.msg"
   "srv/DetectFaces.srv"
   "srv/DetectObjects.srv"
+  "srv/Look.srv"
+  "srv/Move.srv"
   "srv/ParseCommand.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )

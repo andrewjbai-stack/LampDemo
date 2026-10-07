@@ -1,0 +1,14 @@
+# Move the lamp's body (motion_node). The head keeps its look while it moves.
+#   mode "posture": by name (rest, lean_in, sit_back, tall, shy)
+#   mode "angles":  shoulder / elbow pitch, radians
+#   mode "reach":   head pivot at forward (of the base) / height (above the desk), metres
+string mode
+string posture
+float64 shoulder
+float64 elbow
+float64 forward
+float64 height
+---
+bool success     # false: unknown posture or out of reach
+string message
+uint32 goal_id   # matches MotionState.goal_id once motion_node is working on it

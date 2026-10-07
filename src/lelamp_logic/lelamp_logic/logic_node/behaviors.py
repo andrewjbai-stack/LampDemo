@@ -5,9 +5,15 @@ lamp switches to it, and `update()` runs every tick and returns the name of the
 next behavior, or None to stay. All the rules for leaving a behavior live in
 that behavior, so adding a new one doesn't touch the others.
 
-`lamp` is whatever owns the state (logic_node): it needs `.motion` (LampMotion),
-`.attentive` (bool), `.snapshot()` (remember the objects in view) and
-`.focus_target` (x, y, z point for the focus behavior).
+`lamp` is whatever owns the state (logic_node): it needs `.motion` (MotionClient,
+same calls as LampMotion),
+`.attentive` (bool), `.snapshot()` (remember the objects in view),
+`.focus_target` (x, y, z point for the focus behavior) and `.voice_light`
+((r, g, b) asked for by voice, 'off', or None).
+
+The current behavior also decides the light: `light(lamp, t)` returns RGBA. By
+default that's the voice color (if any) at the behavior's brightness; a behavior
+that must override the voice color (like Thinking) overrides `light()`.
 
 Scripted animations subclass Animation and write `script()` as a generator that
 yields how many seconds to wait before its next step:
@@ -22,7 +28,6 @@ yields how many seconds to wait before its next step:
 import math
 import random
 
-from lelamp_logic.motion import aim
 
 CENTER_TV_POS = (-2.0, 0.0, 0.35)
 
@@ -31,7 +36,17 @@ ATTENTIVE_LIGHT = (1.0, 1.0, 1.0, 1.0)
 
 
 class Behavior:
-    color = None  # light colour while this behavior runs
+    color = PASSIVE_LIGHT  # light colour while this behavior runs
+
+    def light(self, lamp, t):
+        """RGBA to show; t = seconds in this behavior. Default: the voice color
+        if one was asked for, at this behavior's brightness."""
+        r, g, b, a = self.color
+        if lamp.voice_light == 'off':
+            return r, g, b, 0.0
+        if lamp.voice_light:
+            r, g, b = lamp.voice_light
+        return r, g, b, a
 
     def enter(self, lamp):
         pass
@@ -144,21 +159,10 @@ class Bored(Animation):
 
     def heading(self, lamp):
         """Where the lamp is looking now, as (yaw, pitch) degrees for look()."""
-        t = lamp.motion.look_target
-        if t is None:
-            return 0.0, 0.0
-        if t[0] == 'point':
-            shoulder = lamp.motion.springs['shoulder_pitch_joint'].x
-            elbow = lamp.motion.springs['elbow_pitch_joint'].x
-            yaw, pitch = aim(shoulder, elbow, *t[1:])
-            up = shoulder + elbow - pitch
-        else:
-            _, yaw, up = t
-        return math.degrees(yaw), math.degrees(up)
+        return lamp.motion.heading()
 
-    def wait_settled(self, lamp, timeout=4.0):
-        """Yield until the lamp stops moving (settled() only checks speed, so
-        give it a moment to get going first)."""
+    def wait_settled(self, lamp, timeout=8.0):
+        """Yield until the lamp has reached its target and stopped, or timeout."""
         yield 0.4
         waited = 0.4
         while not lamp.motion.settled() and waited < timeout:
@@ -228,8 +232,12 @@ class Obey(Behavior):
         return 'idle' if self.elapsed > self.hold else None
 
 class Thinking(Behavior):
-    """The lamp is waiting for the llm to respond, and assumes a thinking pose"""
-    color = PASSIVE_LIGHT
+    """The lamp is waiting for the llm to respond, and assumes a thinking pose.
+    The light pulses bluish white, whatever color was asked for by voice."""
+
+    def light(self, lamp, t):
+        v = 0.65 + 0.25 * math.sin(2.0 * math.pi * 0.75 * t)
+        return v, v, 1.0, 1.0
 
     def __init__(self, grace=5.0):
         self.grace = grace 
@@ -258,10 +266,12 @@ class StateMachine:
         if self.on_change:
             self.on_change(getattr(self, 'name', None), name)
         self.name = name
+        self.t = 0.0  # seconds in the current behavior
         self.current = self.behaviors[name]
         self.current.enter(self.lamp)
 
     def update(self, dt):
+        self.t += dt
         nxt = self.current.update(self.lamp, dt)
         if nxt:
             self.go(nxt)

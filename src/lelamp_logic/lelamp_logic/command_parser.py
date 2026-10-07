@@ -52,7 +52,8 @@ ARG = {'look_at_object': 'object', 'look': 'direction', 'move_to': 'posture',
 def _tool_schema(tool, arg=None, values=None):
     props = {'tool': {'type': 'string', 'enum': [tool]}}
     if arg:
-        props[arg] = {'type': 'string', 'enum': values} if values else {'type': 'string'}
+        props[arg] = ({'type': 'string', 'enum': values} if values
+                      else {'type': 'string', 'minLength': 1, 'maxLength': 30})
     return {'type': 'object', 'properties': props, 'required': list(props),
             'additionalProperties': False}
 
@@ -60,14 +61,15 @@ def _tool_schema(tool, arg=None, values=None):
 def make_schema(known=()):
     """{"request": false} or {"request": true, "commands": [1 to 3 commands]}.
     Deciding "request" first cuts down on small models inventing commands for
-    small talk. look_at_object can only name objects in known (and is left out
-    when nothing has been seen)."""
-    tools = [_tool_schema('scan_room'),
+    small talk. look_at_object can only name objects in known; when nothing
+    has been seen it takes any short name, so "look at the clock" still means
+    look_at_object (logic_node says it hasn't seen it) instead of being forced
+    into some other command."""
+    tools = [_tool_schema('look_at_object', 'object', sorted(known)),
+             _tool_schema('scan_room'),
              _tool_schema('look', 'direction', DIRECTIONS),
              _tool_schema('move_to', 'posture', POSTURES),
              _tool_schema('set_light', 'color', COLORS)]
-    if known:
-        tools.insert(0, _tool_schema('look_at_object', 'object', sorted(known)))
     return {'anyOf': [
         {'type': 'object', 'properties': {'request': {'type': 'boolean', 'enum': [False]}},
          'required': ['request'], 'additionalProperties': False},
