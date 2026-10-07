@@ -39,7 +39,12 @@ class LLMNode(Node):
         if self.parser is None:
             res.success, res.message = False, 'LLM not loaded'
             return res
-        cmds, res.source, res.seconds = self.parser.parse(req.text, list(req.known_objects))
+        try:
+            cmds, res.source, res.seconds = self.parser.parse(req.text, list(req.known_objects))
+        except Exception as e:  # an LLM error must not kill the node
+            self.get_logger().error(f'parse of "{req.text}" failed: {e}')
+            res.success, res.message = False, f'parse failed: {e}'
+            return res
         res.commands = [LampCommand(tool=t, arg=a) for t, a in cmds]
         res.success = True
         res.message = self.parser.last_raw

@@ -7,10 +7,14 @@ detect_objects service) and remembers where each object is in base_link
 Input: /lelamp/look_at_object (std_msgs/String, e.g. "clock")
 Uses:  /lelamp/detect_objects (lelamp_interfaces/DetectObjects, object_node)
 """
+import time
+
 from std_msgs.msg import String
 
 from lelamp_interfaces.srv import DetectObjects
 from lelamp_logic.logic_node.object_memory import ObjectMemory
+
+DETECT_TIMEOUT = 5.0  # s without an answer before a detect_objects call counts as lost
 
 
 class ObjectsMixin:
@@ -19,6 +23,8 @@ class ObjectsMixin:
         self.focus_target = None  # (x, y, z) the focus behavior looks at
         self.detect_client = self.create_client(DetectObjects, 'lelamp/detect_objects')
         self.detecting = False  # a detect_objects call is in flight
+        self.detect_future = None  # that call, and when it was sent
+        self.detect_sent = 0.0
         self.create_subscription(String, 'lelamp/look_at_object', self._on_look_at_object, 10)
 
     def _on_look_at_object(self, msg):
@@ -27,10 +33,16 @@ class ObjectsMixin:
     def snapshot(self):
         """Ask object_node what's in view now and remember it. Returns at once
         (the answer arrives in _on_detected); False if skipped."""
+        if self.detecting and time.monotonic() - self.detect_sent > DETECT_TIMEOUT:
+            self.get_logger().warn('detect_objects: no answer, dropping that call')
+            self.detect_client.remove_pending_request(self.detect_future)
+            self.detecting = False
         if self.detecting or self.thinking or not self.detect_client.service_is_ready():
             return False
         self.detecting = True
-        self.detect_client.call_async(DetectObjects.Request()).add_done_callback(self._on_detected)
+        self.detect_sent = time.monotonic()
+        self.detect_future = self.detect_client.call_async(DetectObjects.Request())
+        self.detect_future.add_done_callback(self._on_detected)
         return True
 
     def _on_detected(self, future):

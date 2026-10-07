@@ -4,12 +4,16 @@ Whatever voice_node hears arrives on /lelamp/speech and is sent to
 llm_node (the parse_command service), which answers with commands to
 run: look at an object, look around, look a way, change posture, set the light.
 While it thinks, face and object checks are paused and new phrases are ignored.
+If llm_node takes longer than parse_timeout seconds, the lamp gives up (back to
+idle) and the late answer is ignored.
 A light color asked for by voice stays until another one is asked for; the
 state still sets the brightness.
 
 Input: /lelamp/speech        (std_msgs/String, voice_node, one per phrase)
 Uses:  /lelamp/parse_command (lelamp_interfaces/ParseCommand, llm_node)
 """
+import time
+
 from std_msgs.msg import String
 
 from lelamp_interfaces.srv import ParseCommand
@@ -28,6 +32,10 @@ class VoiceMixin:
     def _init_voice(self):
         self.parse_client = self.create_client(ParseCommand, 'lelamp/parse_command')
         self.thinking = False  # a parse_command call is in flight
+        self.parse_id = 0  # id of the current call; answers with another id are late
+        self.parse_sent = 0.0  # time.monotonic() the current call was sent
+        self.parse_timeout = float(self.declare_parameter('parse_timeout', 15.0).value)
+        self.create_timer(0.25, self._check_parse_timeout)
         self.voice_light = None  # (r, g, b) asked for by voice, or 'off'; None = state's own
         self.create_subscription(String, 'lelamp/speech', self._on_speech, 10)
 
@@ -41,12 +49,25 @@ class VoiceMixin:
             self.get_logger().warn('llm_node is not running', throttle_duration_sec=10.0)
             return
         self.thinking = True
+        self.parse_id += 1
+        self.parse_sent = time.monotonic()
         req = ParseCommand.Request(text=msg.data, known_objects=self.memory.names())
-        self.parse_client.call_async(req).add_done_callback(self._on_commands)
+        self.parse_client.call_async(req).add_done_callback(
+            lambda f, rid=self.parse_id: self._on_commands(f, rid))
 
         self.brain.go('thinking')
 
-    def _on_commands(self, future):
+    def _check_parse_timeout(self):
+        """Give up on a parse_command call that took too long (Thinking then goes idle)."""
+        if self.thinking and time.monotonic() - self.parse_sent > self.parse_timeout:
+            self.get_logger().warn(f'parse_command: no answer after {self.parse_timeout:.0f} s, giving up')
+            self.thinking = False
+            self.parse_id += 1  # its answer is now late
+
+    def _on_commands(self, future, rid):
+        if rid != self.parse_id:
+            self.get_logger().warn(f'parse_command: late answer ignored ({self._describe(future)})')
+            return
         self.thinking = False
         try:
             res = future.result()
@@ -58,11 +79,23 @@ class VoiceMixin:
             self.get_logger().warn(f'parse_command: {res.message}')
             self.brain.go('idle')
             return
+        # Undo the thinking pose first; each command then sets only what it changes.
+        if self.brain.name == 'thinking' and res.commands:
+            self.brain.current.restore(self)
         for c in res.commands:
             self.run_command(c.tool, c.arg)
         # No command picked a new state (e.g. only set_light): stop thinking.
         if self.brain.name == 'thinking':
             self.brain.go('idle')
+
+    @staticmethod
+    def _describe(future):
+        """Short text for a parse_command answer, for logging."""
+        try:
+            res = future.result()
+        except Exception as e:
+            return f'failed: {e}'
+        return ', '.join(f'{c.tool}({c.arg})' for c in res.commands) or res.message or 'no commands'
 
     def run_command(self, tool, arg):
         """Do one command from llm_node. False if it can't."""

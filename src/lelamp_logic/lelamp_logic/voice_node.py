@@ -58,11 +58,18 @@ class Mic:
         self.buf = ctypes.create_string_buffer(CHUNK * 4)
 
     def read(self):
+        if not self.handle:
+            raise RuntimeError('microphone is closed')
         err = ctypes.c_int()
         if self.pa.pa_simple_read(ctypes.c_void_p(self.handle), self.buf,
                                   len(self.buf), ctypes.byref(err)) < 0:
             raise RuntimeError(f'microphone read failed (pulse error {err.value})')
         return np.frombuffer(self.buf.raw, dtype=np.float32).copy()
+
+    def close(self):
+        if self.handle:
+            self.pa.pa_simple_free(ctypes.c_void_p(self.handle))
+            self.handle = None
 
 
 class Vad:
@@ -76,6 +83,9 @@ class Vad:
         self.session = onnxruntime.InferenceSession(
             os.path.join(get_assets_path(), 'silero_vad_v6.onnx'),
             providers=['CPUExecutionProvider'], sess_options=opts)
+        self.reset()
+
+    def reset(self):
         self.h = np.zeros((1, 1, 128), dtype=np.float32)
         self.c = np.zeros((1, 1, 128), dtype=np.float32)
         self.context = np.zeros(CONTEXT, dtype=np.float32)
@@ -111,7 +121,8 @@ class VoiceNode(Node):
                                     cpu_threads=int(gp('cpu_threads')),
                                     download_root=model_dir)
         self.vad = Vad()
-        self.mic = Mic(gp('device') or None)
+        self.device = gp('device') or None
+        self.mic = Mic(self.device)
 
         self.phrases = queue.Queue()
         self.running = True
@@ -125,12 +136,30 @@ class VoiceNode(Node):
         step = CHUNK / RATE
         pre_roll = deque(maxlen=max(1, int(p['pre_roll_s'] / step)))
         phrase, speech_s, silence_s = None, 0.0, 0.0
+        backoff = 1.0
         while self.running:
             try:
                 chunk = self.mic.read()
-            except RuntimeError as e:
-                self.get_logger().error(str(e))
-                return
+            except Exception as e:
+                # Wait, reopen the mic and start clean; back off while it keeps failing.
+                self.get_logger().error(f'{e}; reopening the mic in {backoff:.0f} s',
+                                        throttle_duration_sec=10.0)
+                try:
+                    self.mic.close()
+                except Exception:
+                    pass
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+                try:
+                    self.mic = Mic(self.device)
+                except Exception as e:
+                    self.get_logger().error(str(e), throttle_duration_sec=10.0)
+                    continue
+                self.vad.reset()
+                pre_roll.clear()
+                phrase = None
+                continue
+            backoff = 1.0
             prob = self.vad(chunk)
             if phrase is None:
                 pre_roll.append(chunk)
@@ -152,12 +181,17 @@ class VoiceNode(Node):
     def _transcribe(self):
         while self.running:
             ended, audio = self.phrases.get()
-            segments, _ = self.whisper.transcribe(
-                audio, language='en', beam_size=1, condition_on_previous_text=False,
-                without_timestamps=True)
-            # Drop what whisper itself thinks is noise (it likes to invent "Thank you.").
-            text = ' '.join(s.text.strip() for s in segments
-                            if s.no_speech_prob < 0.6 and s.avg_logprob > -1.0).strip()
+            try:
+                segments, _ = self.whisper.transcribe(
+                    audio, language='en', beam_size=1, condition_on_previous_text=False,
+                    without_timestamps=True)
+                # Drop what whisper itself thinks is noise (it likes to invent "Thank you.").
+                text = ' '.join(s.text.strip() for s in segments
+                                if s.no_speech_prob < 0.6 and s.avg_logprob > -1.0).strip()
+            except Exception as e:
+                # segments is lazy, so errors can come from the join too; skip the phrase.
+                self.get_logger().error(f'transcribe failed: {e}', throttle_duration_sec=5.0)
+                continue
             if not text:
                 continue
             self.pub.publish(String(data=text))

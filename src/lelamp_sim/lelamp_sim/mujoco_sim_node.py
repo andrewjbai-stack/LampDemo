@@ -25,7 +25,8 @@ import mujoco.viewer
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import (ExternalShutdownException, ShutdownException,
+                             SingleThreadedExecutor, TimeoutException)
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, JointState
@@ -331,9 +332,26 @@ class MujocoSimNode(Node):
         super().destroy_node()
 
 
+def spin_pending(executor, limit=50):
+    """Run the callbacks that are ready now (at most limit) without waiting.
+
+    Commands, light and webcam frames together arrive faster than one callback
+    per tick, so handling only one lets the queues fill and commands land late.
+    """
+    for _ in range(limit):
+        try:
+            handler, _, _ = executor.wait_for_ready_callbacks(timeout_sec=0.0)
+        except (TimeoutException, ShutdownException):
+            return
+        handler()
+        handler.result()  # re-raise anything the callback raised
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = MujocoSimNode()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
     try:
         with mujoco.viewer.launch_passive(node.model, node.data,
                                           show_left_ui=False, show_right_ui=False) as viewer:
@@ -341,7 +359,7 @@ def main(args=None):
             lock_view = bool(node.get_parameter('lock_view').value)
             while viewer.is_running() and rclpy.ok():
                 start = time.monotonic()
-                rclpy.spin_once(node, timeout_sec=0.0)
+                spin_pending(executor)
                 with viewer.lock():
                     if lock_view:
                         apply_view(viewer.cam)
@@ -355,6 +373,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

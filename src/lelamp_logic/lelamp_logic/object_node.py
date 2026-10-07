@@ -87,6 +87,16 @@ class ObjectNode(Node):
             response.message = 'no detector' if self.detector is None else 'no camera frame yet'
             return response
         try:
+            return self._detect(msg, response)
+        except Exception as e:  # a YOLO or tf failure must not kill the node
+            self.get_logger().error(f'detect_objects failed: {e}')
+            response = DetectObjects.Response()  # drop anything half filled in
+            response.success = False
+            response.message = f'detection failed: {e}'
+            return response
+
+    def _detect(self, msg, response):
+        try:
             origin, rot = self._camera_pose(msg)
         except TransformException as e:
             response.success = False

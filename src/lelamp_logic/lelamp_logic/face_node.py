@@ -85,7 +85,16 @@ class FaceNode(Node):
             response.success = False
             response.message = 'no camera frame yet'
             return response
+        try:
+            return self._detect(msg, response)
+        except Exception as e:  # a bad frame or detector error must not kill the node
+            self.get_logger().error(f'detect_faces failed: {e}')
+            response = DetectFaces.Response()  # drop anything half filled in
+            response.success = False
+            response.message = f'detection failed: {e}'
+            return response
 
+    def _detect(self, msg, response):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         h, w = frame.shape[:2]
         scale = self.detect_width / w

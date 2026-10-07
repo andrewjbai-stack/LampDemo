@@ -8,8 +8,8 @@ that behavior, so adding a new one doesn't touch the others.
 `lamp` is whatever owns the state (logic_node): it needs `.motion` (MotionClient,
 same calls as LampMotion),
 `.attentive` (bool), `.snapshot()` (remember the objects in view),
-`.focus_target` (x, y, z point for the focus behavior) and `.voice_light`
-((r, g, b) asked for by voice, 'off', or None).
+`.focus_target` (x, y, z point for the focus behavior), `.voice_light`
+((r, g, b) asked for by voice, 'off', or None) and `.thinking` (waiting for llm_node).
 
 The current behavior also decides the light: `light(lamp, t)` returns RGBA. By
 default that's the voice color (if any) at the behavior's brightness; a behavior
@@ -233,27 +233,36 @@ class Obey(Behavior):
 
 class Thinking(Behavior):
     """The lamp is waiting for the llm to respond, and assumes a thinking pose.
-    The light pulses bluish white, whatever color was asked for by voice."""
+    The light pulses bluish white, whatever color was asked for by voice.
+    The answer picks the next state; if lamp.thinking clears without one
+    (logic_node gave up waiting), go back to idle."""
 
     def light(self, lamp, t):
         v = 0.65 + 0.25 * math.sin(2.0 * math.pi * 0.75 * t)
         return v, v, 1.0, 1.0
 
-    def __init__(self, grace=5.0):
-        self.grace = grace 
+    DIP = 12.0  # deg the head drops from where it was looking
 
     def enter(self, lamp):
-        self.thinking_for = 0.0
+        # The pose from before thinking, for restore().
+        self.look_target = lamp.motion.look_target
+        self.posture = lamp.motion.posture
+        yaw, pitch = lamp.motion.heading()
         lamp.motion.move_to('sit_back')
+        lamp.motion.look(yaw, pitch - self.DIP)
 
-        t = lamp.motion.look_target
-        if t and t[0] == 'point':
-            _, x, y, z = t
-            lamp.motion.look_at(x, y, z - 1)
+    def restore(self, lamp):
+        """Go back to the pose from before thinking, so a command that sets
+        only the look or only the posture doesn't keep half the thinking pose."""
+        t = self.look_target
+        if t[0] == 'point':
+            lamp.motion.look_at(*t[1:])
+        else:
+            lamp.motion.look(math.degrees(t[1]), math.degrees(t[2]))
+        lamp.motion.move_to(*self.posture)
 
     def update(self, lamp, dt):
-        self.thinking_for = self.thinking_for + dt
-        return 'idle' if self.thinking_for > self.grace else None
+        return None if lamp.thinking else 'idle'
 
 class StateMachine:
     def __init__(self, lamp, behaviors, start, on_change=None):
