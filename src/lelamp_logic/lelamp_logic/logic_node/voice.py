@@ -1,8 +1,12 @@
 """Voice commands for logic_node.
 
-Whatever voice_node hears arrives on /lelamp/speech and is sent to
-llm_node (the parse_command service), which answers with commands to
+Whatever voice_node hears arrives on /lelamp/speech. The lamp only listens
+while engaged: someone kept looking at it, or said the wake word ("friend"),
+which makes it engaged for wake_window seconds. Phrases heard while engaged are
+sent to llm_node (the parse_command service), which answers with commands to
 run: look at an object, look around, look a way, change posture, set the light.
+Anything said after the wake word in the same phrase ("friend, look left") is
+sent right away.
 While it thinks, face and object checks are paused and new phrases are ignored.
 If llm_node takes longer than parse_timeout seconds, the lamp gives up (back to
 idle) and the late answer is ignored.
@@ -12,6 +16,7 @@ state still sets the brightness.
 Input: /lelamp/speech        (std_msgs/String, voice_node, one per phrase)
 Uses:  /lelamp/parse_command (lelamp_interfaces/ParseCommand, llm_node)
 """
+import re
 import time
 
 from std_msgs.msg import String
@@ -37,21 +42,40 @@ class VoiceMixin:
         self.parse_timeout = float(self.declare_parameter('parse_timeout', 15.0).value)
         self.create_timer(0.25, self._check_parse_timeout)
         self.voice_light = None  # (r, g, b) asked for by voice, or 'off'; None = state's own
+        wake_word = self.declare_parameter('wake_word', 'friend').value
+        self.wake_re = re.compile(rf'\b{re.escape(wake_word)}\b', re.IGNORECASE)
+        self.wake_window = float(self.declare_parameter('wake_window', 8.0).value)
+        self.awake_until = 0.0  # time.monotonic() the wake word stops keeping it engaged
         self.create_subscription(String, 'lelamp/speech', self._on_speech, 10)
 
     def _on_speech(self, msg):
-        """A phrase from voice_node: ask llm_node what to do."""
+        """A phrase from voice_node: the wake word makes the lamp engaged; while
+        engaged, ask llm_node what to do."""
+        text = msg.data
         if self.thinking:
-            self.get_logger().info(f'heard: "{msg.data}" (still thinking, ignored)')
+            self.get_logger().info(f'heard: "{text}" (still thinking, ignored)')
             return
-        self.get_logger().info(f'heard: "{msg.data}"')
+        wake = self.wake_re.search(text)
+        if wake:
+            self.awake_until = time.monotonic() + self.wake_window
+            if self.brain.name != 'engaged':
+                self.brain.go('engaged')
+            text = text[wake.end():].strip(' ,.!?')  # a command said in the same breath
+            if not re.search(r'\w', text):
+                self.get_logger().info(f'heard the wake word, listening for {self.wake_window:.0f} s')
+                return
+        elif self.brain.name != 'engaged':
+            self.get_logger().info(f'heard: "{text}" (not engaged, ignored)')
+            return
+        self.get_logger().info(f'heard: "{text}"')
         if not self.parse_client.service_is_ready():
             self.get_logger().warn('llm_node is not running', throttle_duration_sec=10.0)
             return
         self.thinking = True
         self.parse_id += 1
         self.parse_sent = time.monotonic()
-        req = ParseCommand.Request(text=msg.data, known_objects=self.memory.names())
+        self.awake_until = 0.0  # the wake word is used up
+        req = ParseCommand.Request(text=text, known_objects=self.memory.names())
         self.parse_client.call_async(req).add_done_callback(
             lambda f, rid=self.parse_id: self._on_commands(f, rid))
 

@@ -9,7 +9,8 @@ that behavior, so adding a new one doesn't touch the others.
 same calls as LampMotion),
 `.attentive` (bool), `.snapshot()` (remember the objects in view),
 `.focus_target` (x, y, z point for the focus behavior), `.voice_light`
-((r, g, b) asked for by voice, 'off', or None) and `.thinking` (waiting for llm_node).
+((r, g, b) asked for by voice, 'off', or None), `.thinking` (waiting for llm_node)
+and `.awake_until` (time.monotonic() the wake word stops keeping it engaged).
 
 The current behavior also decides the light: `light(lamp, t)` returns RGBA. By
 default that's the voice color (if any) at the behavior's brightness; a behavior
@@ -27,12 +28,14 @@ yields how many seconds to wait before its next step:
 """
 import math
 import random
+import time
 
 
 CENTER_TV_POS = (-2.0, 0.0, 0.35)
 
 PASSIVE_LIGHT = (1.0, 1.0, 1.0, 0.5)
-ATTENTIVE_LIGHT = (1.0, 1.0, 1.0, 1.0)
+ATTENTIVE_LIGHT = (1.0, 1.0, 1.0, 0.7)  # someone looked: a bit brighter than passive
+BRIGHT_LIGHT = (1.0, 1.0, 1.0, 1.0)  # engaged, and anything the lamp is busy doing
 
 
 class Behavior:
@@ -85,19 +88,49 @@ class Animation(Behavior):
 
 
 class Attentive(Behavior):
-    """Someone is looking at the lamp: stand tall and look back at them."""
+    """Someone is looking at the lamp: stand tall and look back at them, a bit
+    brighter than passive. Kept looking for engage_after seconds: engaged."""
     color = ATTENTIVE_LIGHT
 
-    def __init__(self, grace=1.0):
+    def __init__(self, grace=1.0, engage_after=3.0):
         self.grace = grace  # seconds of no face before giving up (detector flickers)
+        self.engage_after = engage_after  # seconds of looking before engaged
 
     def enter(self, lamp):
         self.away = 0.0
+        self.looked = 0.0
         lamp.motion.move_to('tall')
         lamp.motion.look_at(*CENTER_TV_POS)
 
     def update(self, lamp, dt):
-        self.away = 0.0 if lamp.attentive else self.away + dt
+        if lamp.attentive:
+            self.away = 0.0
+            self.looked += dt
+        else:
+            self.away += dt
+        if self.away > self.grace:
+            return 'idle'
+        return 'engaged' if self.looked >= self.engage_after else None
+
+
+class Engaged(Behavior):
+    """Second layer of attention, full brightness: they kept looking (from
+    Attentive) or said the wake word (until lamp.awake_until). Only while engaged
+    are heard phrases sent to llm_node. Goes back to idle once nobody is looking
+    and the wake word's time is up."""
+    color = BRIGHT_LIGHT
+
+    def __init__(self, grace=1.0):
+        self.grace = grace
+
+    def enter(self, lamp):
+        self.away = 0.0
+        lamp.motion.move_to('tall')  # same pose as Attentive (the wake word skips it)
+        lamp.motion.look_at(*CENTER_TV_POS)
+
+    def update(self, lamp, dt):
+        held = lamp.attentive or time.monotonic() < lamp.awake_until
+        self.away = 0.0 if held else self.away + dt
         return 'idle' if self.away > self.grace else None
 
 
@@ -125,7 +158,7 @@ class LookAround(Animation):
     memory), then settle back to idle. Starts from whichever end is nearer."""
     HEADINGS = (-140.0, -95.0, -50.0, -5.0, 40.0, 85.0, 130.0)  # deg, + = lamp's left
 
-    color = ATTENTIVE_LIGHT
+    color = BRIGHT_LIGHT
 
     def script(self, lamp):
         headings = list(self.HEADINGS)
@@ -200,7 +233,7 @@ class Bored(Animation):
 class Focus(Behavior):
     """Look at lamp.focus_target (a remembered object) for a while."""
 
-    color = ATTENTIVE_LIGHT
+    color = BRIGHT_LIGHT
 
     def __init__(self, hold=4.0):
         self.hold = hold
@@ -219,7 +252,7 @@ class Obey(Behavior):
     """Doing what it was told (logic_node sets the motion before switching here).
     Holds that pose for a while, without getting bored or attentive."""
     
-    color = ATTENTIVE_LIGHT
+    color = BRIGHT_LIGHT
 
     def __init__(self, hold=8.0):
         self.hold = hold

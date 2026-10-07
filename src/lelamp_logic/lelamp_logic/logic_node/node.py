@@ -1,6 +1,6 @@
 """Stub for the LeLamp's "brain".
 
-Runs a small state machine (behaviors.py: idle, attentive, look_around, focus, obey).
+Runs a small state machine (behaviors.py: idle, attentive, engaged, look_around, focus, obey).
 The current state sets look and move goals on motion_node (through
 motion_client.py), which eases the joints on its own timer. The light color
 comes from the current state.
@@ -18,7 +18,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import ColorRGBA
 
-from lelamp_logic.logic_node.behaviors import Attentive, Focus, Idle, LookAround, Obey, Bored, StateMachine, Thinking
+from lelamp_logic.logic_node.behaviors import Attentive, Engaged, Focus, Idle, LookAround, Obey, Bored, StateMachine, Thinking
 from lelamp_logic.logic_node.faces import FacesMixin
 from lelamp_logic.logic_node.motion_client import MotionClient
 from lelamp_logic.logic_node.objects import ObjectsMixin
@@ -30,6 +30,7 @@ class LogicNode(FacesMixin, ObjectsMixin, VoiceMixin, Node):
         super().__init__('logic_node')
         self.declare_parameter('rate_hz', 30.0)
         self.declare_parameter('face_rate_hz', 10.0)  # how often to check for faces
+        self.declare_parameter('engage_after', 3.0)  # s of being looked at before engaged
 
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.dt = 1.0 / float(gp('rate_hz'))
@@ -40,7 +41,8 @@ class LogicNode(FacesMixin, ObjectsMixin, VoiceMixin, Node):
         self._init_voice()
 
         self.brain = StateMachine(
-            self, {'idle': Idle(), 'attentive': Attentive(), 'look_around': LookAround(),
+            self, {'idle': Idle(), 'attentive': Attentive(engage_after=float(gp('engage_after'))),
+                   'engaged': Engaged(), 'look_around': LookAround(),
                    'focus': Focus(), 'obey': Obey(), 'bored': Bored(), 'thinking': Thinking()},
             start='idle',
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
