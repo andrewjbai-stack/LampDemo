@@ -30,6 +30,11 @@ def generate_launch_description():
             package='lelamp_sim',
             executable='mujoco_sim',
             parameters=[{'robot_description': robot_description}],
+            # The viewer redraws as fast as it can on the CPU (llvmpipe), one thread
+            # per core by default (~2.8 of 4 cores). Two threads keep the sim at
+            # ~28 Hz and leave room for whisper and the LLM; only the viewer's own
+            # frame rate drops. (The GPU path, d3d12, makes the head camera ~4 fps.)
+            additional_env={'LP_NUM_THREADS': '2'},
         ),
         Node(
             package='rviz2',

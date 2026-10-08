@@ -12,6 +12,10 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/models', glob('models/*.onnx')),
+    ] + [
+        # one entry per sound (assets/sounds/<name>/<name>_1..5.wav); data_files isn't recursive
+        ('share/' + package_name + '/' + d.rstrip('/'), glob(d + '*.wav'))
+        for d in sorted(glob('assets/sounds/*/'))
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,6 +31,7 @@ setup(
             'object_node = lelamp_logic.object_node:main',
             'voice_node = lelamp_logic.voice_node:main',
             'llm_node = lelamp_logic.llm_node:main',
+            'sound_node = lelamp_logic.sound_node:main',
         ],
     },
 )

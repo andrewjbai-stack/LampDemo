@@ -55,6 +55,10 @@ def generate_launch_description():
         ),
         Node(
             package='lelamp_logic',
+            executable='sound_node',
+        ),
+        Node(
+            package='lelamp_logic',
             executable='logic_node',
         ),
     ])

@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Look.srv"
   "srv/Move.srv"
   "srv/ParseCommand.srv"
+  "srv/PlaySound.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

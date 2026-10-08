@@ -1,0 +1,7 @@
+# Play one of the lamp's sounds (sound_node), in a random one of its variations.
+# Returns as soon as playback starts; it doesn't wait for the sound to end.
+string sound        # an emotion ("thinking": any thinking sound) or one sound ("happy_trill")
+---
+bool success        # false: unknown sound, or the speaker couldn't be opened
+string message      # why it failed (lists the known emotions and sounds), or what's playing
+string file         # the file picked, e.g. "thinking_burble_2.wav"

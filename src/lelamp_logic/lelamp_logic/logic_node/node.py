@@ -11,12 +11,15 @@ The node is split by input, one mixin per file:
   voice.py   - sends what voice_node heard to llm_node and runs its commands
 
 Uses:    /lelamp/look, /lelamp/move, /lelamp/motion_state (motion_node)
+         /lelamp/play_sound (sound_node)
 Outputs: /lelamp/light (std_msgs/ColorRGBA)
 """
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import ColorRGBA
+
+from lelamp_interfaces.srv import PlaySound
 
 from lelamp_logic.logic_node.behaviors import Attentive, Engaged, Focus, Idle, LookAround, Obey, Bored, StateMachine, Thinking
 from lelamp_logic.logic_node.faces import FacesMixin
@@ -35,6 +38,7 @@ class LogicNode(FacesMixin, ObjectsMixin, VoiceMixin, Node):
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
         self.dt = 1.0 / float(gp('rate_hz'))
         self.motion = MotionClient(self)  # motion_node
+        self.sound_client = self.create_client(PlaySound, 'lelamp/play_sound')  # sound_node
 
         self._init_faces(float(gp('face_rate_hz')))
         self._init_objects()
@@ -57,6 +61,22 @@ class LogicNode(FacesMixin, ObjectsMixin, VoiceMixin, Node):
         # The current behavior picks the light (behaviors.py, Behavior.light).
         r, g, b, a = self.brain.current.light(self, self.brain.t)
         self.color_pub.publish(ColorRGBA(r=r, g=g, b=b, a=a))
+
+    def play_sound(self, name):
+        """Ask sound_node to play a sound (e.g. 'thinking'); doesn't wait. Skipped if it isn't running."""
+        if not self.sound_client.service_is_ready():
+            self.get_logger().warn('sound_node is not running', throttle_duration_sec=10.0)
+            return
+        self.sound_client.call_async(PlaySound.Request(sound=name)).add_done_callback(self._on_sound)
+
+    def _on_sound(self, future):
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'play_sound failed: {e}')
+            return
+        if not res.success:
+            self.get_logger().warn(f'play_sound: {res.message}')
 
 
 def main(args=None):

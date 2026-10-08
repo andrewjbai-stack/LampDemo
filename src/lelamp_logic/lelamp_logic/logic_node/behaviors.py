@@ -9,8 +9,10 @@ that behavior, so adding a new one doesn't touch the others.
 same calls as LampMotion),
 `.attentive` (bool), `.snapshot()` (remember the objects in view),
 `.focus_target` (x, y, z point for the focus behavior), `.voice_light`
-((r, g, b) asked for by voice, 'off', or None), `.thinking` (waiting for llm_node)
-and `.awake_until` (time.monotonic() the wake word stops keeping it engaged).
+((r, g, b) asked for by voice, 'off', or None), `.thinking` (waiting for llm_node),
+`.awake_until` (time.monotonic() the wake word stops keeping it engaged)
+and `.play_sound(name)` (an emotion like 'thinking', or one sound like 'happy_trill';
+see assets/sounds/README.md; doesn't wait).
 
 The current behavior also decides the light: `light(lamp, t)` returns RGBA. By
 default that's the voice color (if any) at the behavior's brightness; a behavior
@@ -97,6 +99,7 @@ class Attentive(Behavior):
         self.engage_after = engage_after  # seconds of looking before engaged
 
     def enter(self, lamp):
+        lamp.play_sound('notice')
         self.away = 0.0
         self.looked = 0.0
         lamp.motion.move_to('tall')
@@ -124,6 +127,7 @@ class Engaged(Behavior):
         self.grace = grace
 
     def enter(self, lamp):
+        lamp.play_sound('wake')
         self.away = 0.0
         lamp.motion.move_to('tall')  # same pose as Attentive (the wake word skips it)
         lamp.motion.look_at(*CENTER_TV_POS)
@@ -142,6 +146,8 @@ class Idle(Behavior):
         self.bored_after = bored_after
 
     def enter(self, lamp):
+        lamp.play_sound('sleep')
+
         self.elapsed = 0.0
         lamp.motion.move_to('rest')
         lamp.motion.look_at(*CENTER_TV_POS)
@@ -165,6 +171,8 @@ class LookAround(Animation):
         if random.random() < 0.5:
             headings.reverse()
         for yaw in headings:
+            lamp.play_sound('ack')
+
             lamp.motion.look(yaw + random.uniform(-5.0, 5.0), random.uniform(-15.0, 0.0))
             yield 0.5
             waited = 0.0
@@ -188,7 +196,7 @@ class Bored(Animation):
     look_for_attentive = True
 
     STRETCH_POSTURE = (-0.6, 0.0)  # (shoulder, elbow) arm out straight
-    STRETCH_YAW = 135.0            # deg each side (base yaw limit is ~149)
+    STRETCH_YAW = 90.0          # deg each side (base yaw limit is ~149)
 
     def heading(self, lamp):
         """Where the lamp is looking now, as (yaw, pitch) degrees for look()."""
@@ -203,6 +211,7 @@ class Bored(Animation):
             waited += 0.1
 
     def script(self, lamp):
+        lamp.play_sound('sigh')
         yield from random.choice((self.glance, self.stretch))(lamp)
 
     def glance(self, lamp):
@@ -227,6 +236,8 @@ class Bored(Animation):
             yield random.uniform(0.8, 1.2)  # hold the stretch
         lamp.motion.move_to(*posture)
         lamp.motion.look(yaw, pitch)
+        lamp.play_sound('happy')
+
         yield from self.wait_settled(lamp)
 
 
@@ -258,6 +269,8 @@ class Obey(Behavior):
         self.hold = hold
 
     def enter(self, lamp):
+        lamp.play_sound('ack')
+
         self.elapsed = 0.0
 
     def update(self, lamp, dt):
@@ -283,6 +296,7 @@ class Thinking(Behavior):
         yaw, pitch = lamp.motion.heading()
         lamp.motion.move_to('sit_back')
         lamp.motion.look(yaw, pitch - self.DIP)
+        lamp.play_sound('thinking')
 
     def restore(self, lamp):
         """Go back to the pose from before thinking, so a command that sets

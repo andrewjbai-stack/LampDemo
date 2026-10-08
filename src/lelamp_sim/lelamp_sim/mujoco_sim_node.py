@@ -192,7 +192,7 @@ class MujocoSimNode(Node):
     def __init__(self):
         super().__init__('mujoco_sim')
         self.declare_parameter('robot_description', '')
-        self.declare_parameter('rate_hz', 60.0)
+        self.declare_parameter('rate_hz', 30.0)  # viewer + joint updates; 60 took ~2.5 of 4 cores
         self.declare_parameter('lock_view', False)  # pin the viewer camera to VIEW
         # Kept small and slow: every frame is rendered on the CPU.
         self.declare_parameter('camera_width', 320)
