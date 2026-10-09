@@ -1,4 +1,36 @@
+﻿# colcon
 build/
 install/
 log/
+logs/
+
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Big model weights live in ~/.lelamp/models, never in the repo
+# (the small YuNet .onnx in src/lelamp_logic/models/ is intentionally tracked)
+*.gguf
+*.pt
+*.pth
+*.safetensors
+
+# Recordings
+*.bag
+*.mcap
+*.db3
+
+# Secrets
+.env
+*.pem
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
