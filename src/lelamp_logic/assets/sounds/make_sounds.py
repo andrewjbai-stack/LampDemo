@@ -108,6 +108,18 @@ SOUNDS = {
         "wobble":   (lambda: tone(700, 500, 0.45, vib=0.12, vib_hz=7, fm=0.4), 0.5),
         "scramble": (lambda: seq(babble(5, 400, 1400, dur=0.05, gap_lo=0.01, gap_hi=0.03), tone(600, 350, 0.2)), 0.5),
     },
+    "yes": {  # nod: two rising notes, "uh-huh"
+        "uh_huh":   (lambda: seq(tone(700, 750, 0.1, bright=0.15), gap(0.05), tone(900, 1150, 0.13, curve=0.5, bright=0.15)), 0.55),
+        "mhm":      (lambda: seq(tone(600, 620, 0.12, bright=0.1, a=0.03), gap(0.03), tone(800, 900, 0.16, bright=0.1, r=0.08)), 0.5),
+        "yup":      (lambda: seq(tone(1000, 1400, 0.08, curve=0.4), gap(0.03), tone(1400, 1500, 0.05, r=0.02)), 0.55),
+        "ding":     (lambda: notes([784, 1175], 0.09, 0.03, bright=0.1), 0.5),
+    },
+    "no": {  # head shake: two falling notes, "uh-uh"
+        "uh_uh":    (lambda: seq(tone(800, 760, 0.1, bright=0.15), gap(0.06), tone(640, 520, 0.16, bright=0.15)), 0.55),
+        "nope":     (lambda: seq(tone(900, 650, 0.14, curve=0.6), gap(0.03), tone(600, 580, 0.06, r=0.02)), 0.55),
+        "nuh_uh":   (lambda: seq(tone(700, 720, 0.08), gap(0.05), tone(560, 560, 0.08), gap(0.05), tone(560, 450, 0.12)), 0.5),
+        "buzz":     (lambda: seq(tone(330, 310, 0.12, fm=1.5, fm_ratio=0.5, bright=0.3), gap(0.05), tone(300, 260, 0.16, fm=1.5, fm_ratio=0.5, bright=0.3)), 0.45),
+    },
     "happy": {  # success / delight: trills, arpeggios, bouncy
         "trill":    (lambda: seq(tone(800, 1600, 0.3, vib=0.08, vib_hz=22, curve=0.7), gap(0.02), tone(1600, 2000, 0.08)), 0.6),
         "giggle":   (lambda: notes([(1200, 1400), (1100, 1300), (1300, 1500), (1200, 1450)], 0.05, 0.04, bright=0.15), 0.55),

@@ -3,6 +3,8 @@
 While looking around, the lamp asks object_node what it can see (the
 detect_objects service) and remembers where each object is in base_link
 (object_memory.py). Asking for an object by name makes it look back at it.
+If it has never seen it, it looks around the room for it (the Search
+behavior, behaviors.py) and looks at it once found.
 
 Input: /lelamp/look_at_object (std_msgs/String, e.g. "clock")
 Uses:  /lelamp/detect_objects (lelamp_interfaces/DetectObjects, object_node)
@@ -21,6 +23,7 @@ class ObjectsMixin:
     def _init_objects(self):
         self.memory = ObjectMemory()  # fresh every run
         self.focus_target = None  # (x, y, z) the focus behavior looks at
+        self.search_name = None  # what the search behavior is looking for
         self.detect_client = self.create_client(DetectObjects, 'lelamp/detect_objects')
         self.detecting = False  # a detect_objects call is in flight
         self.detect_future = None  # that call, and when it was sent
@@ -62,11 +65,14 @@ class ObjectsMixin:
             self.get_logger().info(f'saw: {res.message}')
 
     def look_at_object(self, name):
-        """Look at a remembered object for a while. False if it's never been seen."""
+        """Look at a remembered object for a while. Never seen it: look around
+        the room for it (Search), and look at it if it turns up."""
         point = self.memory.find(name)
         if point is None:
-            self.get_logger().info(f"haven't seen '{name}' (known: {', '.join(self.memory.names())})")
-            return False
+            self.get_logger().info(f"haven't seen '{name}', looking around for it")
+            self.search_name = name
+            self.brain.go('search')
+            return True
         self.focus_target = point
         self.brain.go('focus')
         return True

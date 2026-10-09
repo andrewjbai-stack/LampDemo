@@ -28,7 +28,9 @@ ros2 launch ~/lelamp_ws/launch/lelamp.launch.py
 
 Say "friend" to wake the lamp, then a command like "turn the light blue".
 
-Try asking it to look around, and ask about the items in the room
+Try asking it to look around, and ask about the items in the room.
+Yes/no questions get a nod or a head shake: "have you seen a plant?" is answered from
+what it has seen, "is the sky blue?" by the LLM.
 
 ## Webcam (optional)
 

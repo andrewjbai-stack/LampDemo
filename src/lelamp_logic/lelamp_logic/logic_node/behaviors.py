@@ -8,7 +8,9 @@ that behavior, so adding a new one doesn't touch the others.
 `lamp` is whatever owns the state (logic_node): it needs `.motion` (MotionClient,
 same calls as LampMotion),
 `.attentive` (bool), `.snapshot()` (remember the objects in view),
-`.focus_target` (x, y, z point for the focus behavior), `.voice_light`
+`.focus_target` (x, y, z point for the focus behavior), `.search_name` (what
+the search behavior looks for), `.memory` (ObjectMemory), `.detecting` (a
+snapshot's answer is pending), `.voice_light`
 ((r, g, b) asked for by voice, 'off', or None), `.thinking` (waiting for llm_node),
 `.awake_until` (time.monotonic() the wake word stops keeping it engaged)
 and `.play_sound(name)` (an emotion like 'thinking', or one sound like 'happy_trill';
@@ -21,7 +23,7 @@ that must override the voice color (like Thinking) overrides `light()`.
 Scripted animations subclass Animation and write `script()` as a generator that
 yields how many seconds to wait before its next step:
 
-    class Nod(Animation):
+    class Peek(Animation):
         def script(self, lamp):
             lamp.motion.look(0, -30)
             yield 0.4
@@ -182,6 +184,40 @@ class LookAround(Animation):
             yield 0.3  # let a camera frame from the new pose arrive
             lamp.snapshot()
             yield random.uniform(0.5, 1.0)
+            if (yield from self.check(lamp)):
+                return
+
+    def check(self, lamp):
+        """Runs after each snapshot; True ends the sweep early. Nothing to check here."""
+        return False
+        yield
+
+
+class Search(LookAround):
+    """Look around for lamp.search_name, an object the lamp hasn't seen yet
+    (a voice command asked for it). After each snapshot, checks the memory:
+    found, a happy sound and focus on it; not found anywhere in the sweep, a
+    confused sound and back to idle."""
+
+    def script(self, lamp):
+        self.then = 'idle'
+        yield from super().script(lamp)
+        if self.then == 'idle':
+            lamp.play_sound('confused')
+
+    def check(self, lamp):
+        waited = 0.0
+        while lamp.detecting and waited < 3.0:  # this snapshot's answer first
+            yield 0.1
+            waited += 0.1
+        point = lamp.memory.find(lamp.search_name)
+        if point is None:
+            return False
+        lamp.focus_target = point
+        lamp.play_sound('happy')
+        self.then = 'focus'
+        return True
+
 
 class Bored(Animation):
     """Something to do while nobody's around. Each time, plays one of a few
@@ -277,6 +313,60 @@ class Obey(Behavior):
         self.elapsed += dt
         return 'idle' if self.elapsed > self.hold else None
 
+
+def look_back(lamp, target):
+    """Aim the head at a saved lamp.motion.look_target again."""
+    if target[0] == 'point':
+        lamp.motion.look_at(*target[1:])
+    else:
+        lamp.motion.look(math.degrees(target[1]), math.degrees(target[2]))
+
+
+class Answer(Animation):
+    """Answer a yes/no question (logic_node picks Nod or Shake): a head gesture,
+    a sound, and a tint of the light that fades out. Each of `moves` is a
+    (yaw, pitch) offset in degrees from where the lamp was looking, held for
+    `beat` seconds; then it looks back and goes idle."""
+    color = BRIGHT_LIGHT
+    tint = (1.0, 1.0, 1.0)
+    sound = 'ack'
+    moves = ()
+    beat = 0.35
+    TINT_TIME = 2.0  # s for the tint to fade back to the usual light
+
+    def light(self, lamp, t):
+        r, g, b, a = super().light(lamp, t)
+        w = max(0.0, 1.0 - t / self.TINT_TIME)
+        tr, tg, tb = self.tint
+        return r + w * (tr - r), g + w * (tg - g), b + w * (tb - b), max(a, w)
+
+    def script(self, lamp):
+        target = lamp.motion.look_target
+        yield 0.3  # lets motion_state catch up with that look, so heading() is fresh
+        yaw, pitch = lamp.motion.heading()
+        lamp.play_sound(self.sound)
+        for dyaw, dpitch in self.moves:
+            lamp.motion.look(yaw + dyaw, pitch + dpitch)
+            yield self.beat
+        look_back(lamp, target)
+        yield 0.8
+
+
+class Nod(Answer):
+    """Yes: head down and up twice, green."""
+    tint = (0.2, 1.0, 0.3)
+    sound = 'yes'
+    moves = ((0.0, -25.0), (0.0, 5.0), (0.0, -25.0), (0.0, 5.0))
+
+
+class Shake(Answer):
+    """No: turn left and right twice, red."""
+    tint = (1.0, 0.25, 0.15)
+    sound = 'no'
+    moves = ((25.0, 0.0), (-25.0, 0.0), (25.0, 0.0), (-25.0, 0.0))
+    beat = 0.4
+
+
 class Thinking(Behavior):
     """The lamp is waiting for the llm to respond, and assumes a thinking pose.
     The light pulses bluish white, whatever color was asked for by voice.
@@ -301,11 +391,7 @@ class Thinking(Behavior):
     def restore(self, lamp):
         """Go back to the pose from before thinking, so a command that sets
         only the look or only the posture doesn't keep half the thinking pose."""
-        t = self.look_target
-        if t[0] == 'point':
-            lamp.motion.look_at(*t[1:])
-        else:
-            lamp.motion.look(math.degrees(t[1]), math.degrees(t[2]))
+        look_back(lamp, self.look_target)
         lamp.motion.move_to(*self.posture)
 
     def update(self, lamp, dt):

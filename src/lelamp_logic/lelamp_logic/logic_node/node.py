@@ -1,6 +1,7 @@
 """Stub for the LeLamp's "brain".
 
-Runs a small state machine (behaviors.py: idle, attentive, engaged, look_around, focus, obey).
+Runs a small state machine (behaviors.py: idle, attentive, engaged, look_around, search, focus,
+obey, nod, shake, bored, thinking).
 The current state sets look and move goals on motion_node (through
 motion_client.py), which eases the joints on its own timer. The light color
 comes from the current state.
@@ -21,7 +22,7 @@ from std_msgs.msg import ColorRGBA
 
 from lelamp_interfaces.srv import PlaySound
 
-from lelamp_logic.logic_node.behaviors import Attentive, Engaged, Focus, Idle, LookAround, Obey, Bored, StateMachine, Thinking
+from lelamp_logic.logic_node.behaviors import Attentive, Engaged, Focus, Idle, LookAround, Nod, Obey, Bored, Search, Shake, StateMachine, Thinking
 from lelamp_logic.logic_node.faces import FacesMixin
 from lelamp_logic.logic_node.motion_client import MotionClient
 from lelamp_logic.logic_node.objects import ObjectsMixin
@@ -47,7 +48,9 @@ class LogicNode(FacesMixin, ObjectsMixin, VoiceMixin, Node):
         self.brain = StateMachine(
             self, {'idle': Idle(), 'attentive': Attentive(engage_after=float(gp('engage_after'))),
                    'engaged': Engaged(), 'look_around': LookAround(),
-                   'focus': Focus(), 'obey': Obey(), 'bored': Bored(), 'thinking': Thinking()},
+                   'search': Search(), 'focus': Focus(), 'obey': Obey(),
+                   'nod': Nod(), 'shake': Shake(),
+                   'bored': Bored(), 'thinking': Thinking()},
             start='idle',
             on_change=lambda old, new: self.get_logger().info(f'state: {old} -> {new}'))
 
