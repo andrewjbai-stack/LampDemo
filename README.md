@@ -15,7 +15,7 @@ Then inside Ubuntu:
 ```bash
 git clone https://github.com/andrewjbai-stack/LampDemo.git ~/lelamp_ws
 cd ~/lelamp_ws
-./setup.sh
+bash setup.sh
 ```
 
 ## Run
@@ -23,6 +23,7 @@ cd ~/lelamp_ws
 In a new terminal:
 
 ```bash
+source install/setup.bash
 ros2 launch ~/lelamp_ws/launch/lelamp.launch.py
 ```
 
