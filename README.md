@@ -23,6 +23,7 @@ bash setup.sh
 In a new terminal:
 
 ```bash
+cd ~/lelamp_ws
 source install/setup.bash
 ros2 launch ~/lelamp_ws/launch/lelamp.launch.py
 ```
