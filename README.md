@@ -2,6 +2,9 @@
 
 A simulated LeLamp in MuJoCo with face, object and voice control. Runs on the CPU only.
 
+DEMO VIDEO: https://youtu.be/3-zqXovAlZU
+TECHNICAL DOCUMENT AT: /technical_document.pdf
+
 ## Setup
 
 In Windows PowerShell:
